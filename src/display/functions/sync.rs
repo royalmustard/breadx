@@ -2,16 +2,16 @@
 
 use crate::{
     auto::sync::{DestroyFenceRequest, Fence, TriggerFenceRequest},
-    display::{Connection, Display},
+    display::{Connection, Display, DisplayVariant},
     sr_request,
 };
 
 #[cfg(feature = "async")]
-use crate::display::AsyncConnection;
+use crate::display::{AsyncConnection, SyncVariant};
 
-impl<Conn: Connection> Display<Conn> {
+impl<Conn: Connection, Var: DisplayVariant> Display<Conn, Var> {
     #[inline]
-    pub fn trigger_fence(&mut self, fence: Fence) -> crate::Result {
+    pub fn trigger_fence(&self, fence: Fence) -> crate::Result {
         sr_request!(
             self,
             TriggerFenceRequest {
@@ -22,7 +22,7 @@ impl<Conn: Connection> Display<Conn> {
     }
 
     #[inline]
-    pub fn free_sync_fence(&mut self, fence: Fence) -> crate::Result {
+    pub fn free_sync_fence(&self, fence: Fence) -> crate::Result {
         sr_request!(
             self,
             DestroyFenceRequest {
@@ -34,9 +34,9 @@ impl<Conn: Connection> Display<Conn> {
 }
 
 #[cfg(feature = "async")]
-impl<Conn: AsyncConnection + Send> Display<Conn> {
+impl<Conn: AsyncConnection> Display<Conn, SyncVariant> {
     #[inline]
-    pub async fn trigger_fence_async(&mut self, fence: Fence) -> crate::Result {
+    pub async fn trigger_fence_async(&self, fence: Fence) -> crate::Result {
         sr_request!(
             self,
             TriggerFenceRequest {
@@ -49,7 +49,7 @@ impl<Conn: AsyncConnection + Send> Display<Conn> {
     }
 
     #[inline]
-    pub async fn free_sync_fence_async(&mut self, fence: Fence) -> crate::Result {
+    pub async fn free_sync_fence_async(&self, fence: Fence) -> crate::Result {
         sr_request!(
             self,
             DestroyFenceRequest {

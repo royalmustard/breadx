@@ -37,7 +37,7 @@ pub enum NameConnection {
 
 impl Connection for NameConnection {
     #[inline]
-    fn send_packet(&mut self, bytes: &[u8], fds: &mut Vec<Fd>) -> crate::Result {
+    fn send_packet(&self, bytes: &[u8], fds: &mut Vec<Fd>) -> crate::Result {
         match self {
             Self::Tcp(t) => t.send_packet(bytes, fds),
             #[cfg(unix)]
@@ -46,7 +46,7 @@ impl Connection for NameConnection {
     }
 
     #[inline]
-    fn read_packet(&mut self, bytes: &mut [u8], fds: &mut Vec<Fd>) -> crate::Result {
+    fn read_packet(&self, bytes: &mut [u8], fds: &mut Vec<Fd>) -> crate::Result {
         match self {
             Self::Tcp(t) => t.read_packet(bytes, fds),
             #[cfg(unix)]
@@ -68,7 +68,7 @@ pub enum AsyncNameConnection {
 impl AsyncConnection for AsyncNameConnection {
     #[inline]
     fn send_packet<'future, 'a, 'b, 'c>(
-        &'a mut self,
+        &'a self,
         bytes: &'b [u8],
         fds: &'c mut Vec<Fd>,
     ) -> GenericConnFuture<'future>
@@ -86,7 +86,7 @@ impl AsyncConnection for AsyncNameConnection {
 
     #[inline]
     fn read_packet<'future, 'a, 'b, 'c>(
-        &'a mut self,
+        &'a self,
         bytes: &'b mut [u8],
         fds: &'c mut Vec<Fd>,
     ) -> GenericConnFuture<'future>

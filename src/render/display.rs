@@ -11,13 +11,13 @@ use crate::{
         },
         xproto::{Drawable, Visualtype},
     },
-    display::{Connection, Display, DisplayLike},
+    display::{Connection, Display, DisplayLike, DisplayVariant},
     send_request, sr_request,
 };
 use alloc::vec::Vec;
 
 #[cfg(feature = "async")]
-use crate::display::AsyncConnection;
+use crate::display::{AsyncConnection, SyncVariant};
 
 /// A wrapper around the `Display` that contains XRender-specific data.
 #[derive(Debug)]
@@ -32,14 +32,15 @@ pub struct RenderDisplay<Dpy> {
 
 impl<Dpy: DisplayLike> DisplayLike for RenderDisplay<Dpy> {
     type Connection = Dpy::Connection;
+    type Variant = Dpy::Variant;
 
     #[inline]
-    fn display(&self) -> &Display<Dpy::Connection> {
+    fn display(&self) -> &Display<Dpy::Connection, Dpy::Variant> {
         self.inner.display()
     }
 
     #[inline]
-    fn display_mut(&mut self) -> &mut Display<Dpy::Connection> {
+    fn display_mut(&mut self) -> &mut Display<Dpy::Connection, Dpy::Variant> {
         self.inner.display_mut()
     }
 }
@@ -241,36 +242,37 @@ pub enum StandardFormat {
 impl<Dpy: DisplayLike> RenderDisplay<Dpy>
 where
     Dpy::Connection: Connection,
+    Dpy::Variant: DisplayVariant,
 {
     /// Initialize a RenderDisplay with the appropriate information.
     #[inline]
     pub fn new(
-        mut dpy: Dpy,
+        dpy: Dpy,
         client_major_version: u32,
         client_minor_version: u32,
     ) -> crate::Result<Self> {
         // run QueryVersion and QueryPictFormats simultaneously
         let qvtok = send_request!(
-            dpy.display_mut(),
+            dpy.display(),
             QueryVersionRequest {
                 client_major_version,
                 client_minor_version,
                 ..Default::default()
             }
         )?;
-        let qpftok = send_request!(dpy.display_mut(), QueryPictFormatsRequest::default())?;
+        let qpftok = send_request!(dpy.display(), QueryPictFormatsRequest::default())?;
 
         let QueryVersionReply {
             major_version,
             minor_version,
             ..
-        } = dpy.display_mut().resolve_request(qvtok)?;
+        } = dpy.display().resolve_request(qvtok)?;
         let QueryPictFormatsReply {
             formats,
             screens,
             subpixels,
             ..
-        } = dpy.display_mut().resolve_request(qpftok)?;
+        } = dpy.display().resolve_request(qpftok)?;
 
         Ok(Self {
             inner: dpy,
@@ -285,36 +287,36 @@ where
     /// Create a new Picture.
     #[inline]
     pub fn create_picture<Target: Into<Drawable>>(
-        &mut self,
+        &self,
         target: Target,
         format: Pictformat,
         properties: PictureParameters,
     ) -> crate::Result<Picture> {
-        let pic = Picture::const_from_xid(self.display_mut().generate_xid()?);
+        let pic = Picture::const_from_xid(self.display().generate_xid()?);
         let cpr = Self::create_picture_request(pic, target.into(), format, properties);
-        sr_request!(self.display_mut(), cpr)?;
+        sr_request!(self.display(), cpr)?;
         Ok(pic)
     }
 
     /// Create a new linear gradient.
     #[inline]
     pub fn create_linear_gradient(
-        &mut self,
+        &self,
         p1: Pointfix,
         p2: Pointfix,
         stops: &[Fixed],
         colors: &[Color],
     ) -> crate::Result<Picture> {
-        let pic = Picture::const_from_xid(self.display_mut().generate_xid()?);
+        let pic = Picture::const_from_xid(self.display().generate_xid()?);
         let clgr = Self::create_linear_gradient_request(pic, p1, p2, stops, colors);
-        sr_request!(self.display_mut(), clgr)?;
+        sr_request!(self.display(), clgr)?;
         Ok(pic)
     }
 
     /// Create a new radial gradient.
     #[inline]
     pub fn create_radial_gradient(
-        &mut self,
+        &self,
         inner: Pointfix,
         outer: Pointfix,
         inner_radius: Fixed,
@@ -322,7 +324,7 @@ where
         stops: &[Fixed],
         colors: &[Color],
     ) -> crate::Result<Picture> {
-        let pic = Picture::const_from_xid(self.display_mut().generate_xid()?);
+        let pic = Picture::const_from_xid(self.display().generate_xid()?);
         let crgr = Self::create_radial_gradient_request(
             pic,
             inner,
@@ -332,39 +334,39 @@ where
             stops,
             colors,
         );
-        sr_request!(self.display_mut(), crgr)?;
+        sr_request!(self.display(), crgr)?;
         Ok(pic)
     }
 
     #[inline]
     pub fn create_conical_gradient(
-        &mut self,
+        &self,
         center: Pointfix,
         angle: Fixed,
         stops: &[Fixed],
         colors: &[Color],
     ) -> crate::Result<Picture> {
-        let pic = Picture::const_from_xid(self.display_mut().generate_xid()?);
+        let pic = Picture::const_from_xid(self.display().generate_xid()?);
         let ccgr = Self::create_conical_gradient_request(pic, center, angle, stops, colors);
-        sr_request!(self.display_mut(), ccgr)?;
+        sr_request!(self.display(), ccgr)?;
         Ok(pic)
     }
 }
 
 #[cfg(feature = "async")]
-impl<Dpy: DisplayLike> RenderDisplay<Dpy>
+impl<Dpy: DisplayLike<Variant = SyncVariant>> RenderDisplay<Dpy>
 where
-    Dpy::Connection: AsyncConnection + Send,
+    Dpy::Connection: AsyncConnection,
 {
     /// Initialize a RenderDisplay with the appropriate information, async redox.
     #[inline]
     pub async fn new_async(
-        mut dpy: Dpy,
+        dpy: Dpy,
         client_major_version: u32,
         client_minor_version: u32,
     ) -> crate::Result<Self> {
         let qvtok = send_request!(
-            dpy.display_mut(),
+            dpy.display(),
             QueryVersionRequest {
                 client_major_version,
                 client_minor_version,
@@ -374,19 +376,19 @@ where
         )
         .await?;
         let qpftok =
-            send_request!(dpy.display_mut(), QueryPictFormatsRequest::default(), async).await?;
+            send_request!(dpy.display(), QueryPictFormatsRequest::default(), async).await?;
 
         let QueryVersionReply {
             major_version,
             minor_version,
             ..
-        } = dpy.display_mut().resolve_request_async(qvtok).await?;
+        } = dpy.display().resolve_request_async(qvtok).await?;
         let QueryPictFormatsReply {
             formats,
             screens,
             subpixels,
             ..
-        } = dpy.display_mut().resolve_request_async(qpftok).await?;
+        } = dpy.display().resolve_request_async(qpftok).await?;
 
         Ok(Self {
             inner: dpy,
@@ -401,36 +403,36 @@ where
     /// Create a new Picture, async redox.
     #[inline]
     pub async fn create_picture_async<Target: Into<Drawable>>(
-        &mut self,
+        &self,
         target: Target,
         format: Pictformat,
         properties: PictureParameters,
     ) -> crate::Result<Picture> {
-        let pic = Picture::const_from_xid(self.display_mut().generate_xid()?);
+        let pic = Picture::const_from_xid(self.display().generate_xid()?);
         let cpr = Self::create_picture_request(pic, target.into(), format, properties);
-        sr_request!(self.display_mut(), cpr, async).await?;
+        sr_request!(self.display(), cpr, async).await?;
         Ok(pic)
     }
 
     /// Create a new linear gradient, async redox.
     #[inline]
     pub async fn create_linear_gradient_async(
-        &mut self,
+        &self,
         p1: Pointfix,
         p2: Pointfix,
         stops: &[Fixed],
         colors: &[Color],
     ) -> crate::Result<Picture> {
-        let pic = Picture::const_from_xid(self.display_mut().generate_xid()?);
+        let pic = Picture::const_from_xid(self.display().generate_xid()?);
         let clgr = Self::create_linear_gradient_request(pic, p1, p2, stops, colors);
-        sr_request!(self.display_mut(), clgr, async).await?;
+        sr_request!(self.display(), clgr, async).await?;
         Ok(pic)
     }
 
     /// Create a new radial gradient, async redox.
     #[inline]
     pub async fn create_radial_gradient_async(
-        &mut self,
+        &self,
         inner: Pointfix,
         outer: Pointfix,
         inner_radius: Fixed,
@@ -438,7 +440,7 @@ where
         stops: &[Fixed],
         colors: &[Color],
     ) -> crate::Result<Picture> {
-        let pic = Picture::const_from_xid(self.display_mut().generate_xid()?);
+        let pic = Picture::const_from_xid(self.display().generate_xid()?);
         let crgr = Self::create_radial_gradient_request(
             pic,
             inner,
@@ -448,21 +450,21 @@ where
             stops,
             colors,
         );
-        sr_request!(self.display_mut(), crgr, async).await?;
+        sr_request!(self.display(), crgr, async).await?;
         Ok(pic)
     }
 
     #[inline]
     pub async fn create_conical_gradient_async(
-        &mut self,
+        &self,
         center: Pointfix,
         angle: Fixed,
         stops: &[Fixed],
         colors: &[Color],
     ) -> crate::Result<Picture> {
-        let pic = Picture::const_from_xid(self.display_mut().generate_xid()?);
+        let pic = Picture::const_from_xid(self.display().generate_xid()?);
         let ccgr = Self::create_conical_gradient_request(pic, center, angle, stops, colors);
-        sr_request!(self.display_mut(), ccgr, async).await?;
+        sr_request!(self.display(), ccgr, async).await?;
         Ok(pic)
     }
 }

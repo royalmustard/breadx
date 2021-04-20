@@ -2,17 +2,20 @@
 
 use crate::{
     auto::xproto::{FreePixmapRequest, Pixmap},
-    display::{Connection, Display},
+    display::{Connection, Display, DisplayVariant},
     sr_request,
 };
 
 #[cfg(feature = "async")]
-use crate::display::AsyncConnection;
+use crate::display::{AsyncConnection, SyncVariant};
 
 impl Pixmap {
     /// Free the memory used by a pixmap.
     #[inline]
-    pub fn free<Conn: Connection>(self, dpy: &mut Display<Conn>) -> crate::Result {
+    pub fn free<Conn: Connection, Var: DisplayVariant>(
+        self,
+        dpy: &Display<Conn, Var>,
+    ) -> crate::Result {
         sr_request!(
             dpy,
             FreePixmapRequest {
@@ -25,9 +28,9 @@ impl Pixmap {
     /// Free the memory used by a pixmap, async redox.
     #[cfg(feature = "async")]
     #[inline]
-    pub async fn free_async<Conn: AsyncConnection + Send>(
+    pub async fn free_async<Conn: AsyncConnection>(
         self,
-        dpy: &mut Display<Conn>,
+        dpy: &Display<Conn, SyncVariant>,
     ) -> crate::Result {
         sr_request!(
             dpy,

@@ -4,11 +4,11 @@
 
 use crate::{
     auto::xproto::{AllocColorReply, AllocColorRequest, Colormap},
-    send_request, Connection, Display, RequestCookie,
+    send_request, Connection, Display, DisplayVariant, RequestCookie,
 };
 
 #[cfg(feature = "async")]
-use crate::display::AsyncConnection;
+use crate::display::{AsyncConnection, SyncVariant};
 
 /// Convenience function for producing an RGB pixel value for supported monitors.
 #[inline]
@@ -83,9 +83,9 @@ impl Colormap {
 
     /// Allocate a new color in the colormap.
     #[inline]
-    pub fn alloc_color<Conn: Connection>(
+    pub fn alloc_color<Conn: Connection, Var: DisplayVariant>(
         self,
-        dpy: &mut Display<Conn>,
+        dpy: &mut Display<Conn, Var>,
         r: u16,
         g: u16,
         b: u16,
@@ -96,9 +96,9 @@ impl Colormap {
     /// Allocate a new color in the colormap, async redox.
     #[cfg(feature = "async")]
     #[inline]
-    pub async fn alloc_color_async<Conn: AsyncConnection + Send>(
+    pub async fn alloc_color_async<Conn: AsyncConnection>(
         self,
-        dpy: &mut Display<Conn>,
+        dpy: &mut Display<Conn, SyncVariant>,
         r: u16,
         g: u16,
         b: u16,
@@ -108,9 +108,9 @@ impl Colormap {
 
     /// Immediately allocate a new color in the colormap.
     #[inline]
-    pub fn alloc_color_immediate<Conn: Connection>(
+    pub fn alloc_color_immediate<Conn: Connection, Var: DisplayVariant>(
         self,
-        dpy: &mut Display<Conn>,
+        dpy: &mut Display<Conn, Var>,
         r: u16,
         g: u16,
         b: u16,
@@ -127,9 +127,9 @@ impl Colormap {
     /// Immediately allocate a new color in the colormap, async redox.
     #[cfg(feature = "async")]
     #[inline]
-    pub async fn alloc_color_immediate_async<Conn: AsyncConnection + Send>(
+    pub async fn alloc_color_immediate_async<Conn: AsyncConnection>(
         self,
-        dpy: &mut Display<Conn>,
+        dpy: &mut Display<Conn, SyncVariant>,
         r: u16,
         g: u16,
         b: u16,

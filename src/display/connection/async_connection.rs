@@ -21,10 +21,10 @@ use futures_lite::io::{AsyncReadExt, AsyncWriteExt};
 pub type GenericConnFuture<'future> = Pin<Box<dyn Future<Output = crate::Result> + Send + 'future>>;
 
 /// Asynchronous breadx connection.
-pub trait AsyncConnection {
+pub trait AsyncConnection: Send + Sync {
     /// Send a packet across the connection in an async manner.
     fn send_packet<'future, 'a, 'b, 'c>(
-        &'a mut self,
+        &'a self,
         bytes: &'b [u8],
         fds: &'c mut Vec<Fd>,
     ) -> GenericConnFuture<'future>
@@ -35,7 +35,7 @@ pub trait AsyncConnection {
 
     /// Read a packet from the connection in an async manner.
     fn read_packet<'future, 'a, 'b, 'c>(
-        &'a mut self,
+        &'a self,
         bytes: &'b mut [u8],
         fds: &'c mut Vec<Fd>,
     ) -> GenericConnFuture<'future>
@@ -50,7 +50,7 @@ macro_rules! unix_aware_async_connection_impl {
         impl AsyncConnection for $name {
             #[inline]
             fn send_packet<'future, 'a, 'b, 'c>(
-                &'a mut self,
+                &'a self,
                 bytes: &'b [u8],
                 fds: &'c mut Vec<Fd>,
             ) -> GenericConnFuture<'future>
@@ -76,7 +76,7 @@ macro_rules! unix_aware_async_connection_impl {
 
             #[inline]
             fn read_packet<'future, 'a, 'b, 'c>(
-                &'a mut self,
+                &'a self,
                 bytes: &'b mut [u8],
                 fds: &'c mut Vec<Fd>,
             ) -> GenericConnFuture<'future>

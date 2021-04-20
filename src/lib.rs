@@ -117,6 +117,7 @@
     clippy::module_name_repetitions, // doesn't matter IMO
     clippy::needless_pass_by_value,
     clippy::too_many_arguments, // we need this sometimes for compliance
+    clippy::upper_case_acronyms,
     clippy::used_underscore_binding,
     clippy::ptr_as_ptr,
     unknown_lints,

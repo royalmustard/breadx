@@ -13,16 +13,16 @@ use crate::{
         },
         AsByteSequence,
     },
-    error::BreadError,
     event::Event,
     util::cycled_zeroes,
-    xid::XidGenerator,
     Fd, Request, XID,
 };
-use alloc::{borrow::Cow, boxed::Box, collections::VecDeque, vec, vec::Vec};
-use core::{fmt, iter, marker::PhantomData, mem, num::NonZeroU32};
-use hashbrown::HashMap;
+use alloc::{boxed::Box, vec, vec::Vec};
+use core::{iter, marker::PhantomData, mem};
 use tinyvec::TinyVec;
+
+#[cfg(feature = "std")]
+use alloc::borrow::Cow;
 
 #[cfg(feature = "async")]
 use core::{future::Future, pin::Pin};
@@ -38,8 +38,10 @@ pub use like::*;
 mod functions;
 mod input;
 mod output;
+mod variant;
 
 pub use functions::*;
+pub use variant::*;
 
 pub(crate) const EXT_KEY_SIZE: usize = 24;
 
@@ -67,43 +69,18 @@ pub(crate) const EXT_KEY_SIZE: usize = 24;
 /// let default_screen = conn.default_screen();
 /// println!("Default screen is {} x {}", default_screen.width_in_pixels, default_screen.height_in_pixels);
 /// ```
-pub struct Display<Conn> {
+#[derive(Debug)]
+pub struct Display<Conn, Variant> {
     // the connection to the server
-    pub(crate) connection: Option<Conn>,
+    pub(crate) connection: Conn,
 
     // the setup received from the server
     pub(crate) setup: Setup,
 
-    // xid generator
-    xid: XidGenerator,
-
     // the screen to be used by default
     default_screen: usize,
 
-    pub(crate) event_queue: VecDeque<Event>,
-    pub(crate) pending_requests: HashMap<u16, PendingRequest>,
-    pub(crate) pending_errors: HashMap<u16, BreadError>,
-    #[allow(clippy::type_complexity)]
-    pub(crate) pending_replies: HashMap<u16, (Box<[u8]>, Box<[Fd]>)>,
-
-    // special events queue
-    pub(crate) special_event_queues: HashMap<XID, VecDeque<Event>>,
-
-    request_number: u64,
-
-    // store the interned atoms
-    pub(crate) wm_protocols_atom: Option<NonZeroU32>,
-
-    // tell whether or not we care about the output of zero-sized replies
-    pub(crate) checked: bool,
-
-    // context db
-    //    context: HashMap<(XID, ContextID), NonNull<c_void>>,
-
-    // hashmap linking extension names to major opcodes
-    // we use byte arrays instead of static string pointers
-    // here because cache locality leads to an overall speedup (todo: verify)
-    extensions: HashMap<[u8; EXT_KEY_SIZE], u8>,
+    pub(crate) variant: Variant,
 }
 
 /// A cookie for a request.
@@ -119,9 +96,9 @@ pub struct RequestCookie<R: Request> {
 
 impl<R: Request> RequestCookie<R> {
     #[inline]
-    pub(crate) fn from_sequence(sequence: u64) -> Self {
+    pub(crate) fn from_sequence(sequence: u16) -> Self {
         Self {
-            sequence: sequence as u16, // truncate to lower bits
+            sequence: sequence,
             _phantom: PhantomData,
         }
     }
@@ -133,30 +110,16 @@ impl<R: Request> RequestCookie<R> {
     }
 }
 
-impl<Conn: fmt::Debug> fmt::Debug for Display<Conn> {
-    #[inline]
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Display")
-            .field("connection", &self.connection)
-            .field("setup", &self.setup)
-            .field("xid", &self.xid)
-            .field("default_screen", &self.default_screen)
-            .field("event_queue", &self.event_queue)
-            .field("pending_requests", &self.pending_requests)
-            .field("pending_replies", &self.pending_replies)
-            .field("request_number", &self.request_number)
-            .finish()
-    }
-}
-
-#[derive(Debug, Default, Clone)]
-pub(crate) struct PendingRequest {
+#[derive(Debug, Default, Clone, Copy)]
+#[doc(hidden)]
+pub struct PendingRequest {
     pub request: u64,
     pub flags: PendingRequestFlags,
 }
 
 #[derive(Default, Debug, Copy, Clone)]
-pub(crate) struct PendingRequestFlags {
+#[doc(hidden)]
+pub struct PendingRequestFlags {
     pub discard_reply: bool,
     pub checked: bool,
     pub expects_fds: bool,
@@ -164,7 +127,8 @@ pub(crate) struct PendingRequestFlags {
 }
 
 #[derive(Debug, Copy, Clone)]
-pub(crate) enum RequestWorkaround {
+#[doc(hidden)]
+pub enum RequestWorkaround {
     NoWorkaround,
     GlxFbconfigBug,
 }
@@ -196,11 +160,11 @@ const fn endian_byte() -> u8 {
     }
 }
 
-impl<Conn> Display<Conn> {
+impl<Conn, Variant: DisplayVariant> Display<Conn, Variant> {
     /// Gets the connection associated with this display, and producing an error if the connection
     /// is tainted.
-    pub fn connection(&mut self) -> crate::Result<&mut Conn> {
-        self.connection.as_mut().ok_or(crate::BreadError::Tainted)
+    pub fn connection(&self) -> crate::Result<&Conn> {
+        Ok(&self.connection)
     }
 
     #[inline]
@@ -217,80 +181,29 @@ impl<Conn> Display<Conn> {
 
     /// Register a queue for special events in the display.
     #[inline]
-    pub fn register_special_event(&mut self, eid: XID) {
-        self.special_event_queues
-            .insert(eid, VecDeque::with_capacity(8));
+    pub fn register_special_event(&self, eid: XID) {
+        self.variant.register_special_event(eid);
     }
 
     /// Unregister for a special event.
     #[inline]
-    pub fn unregister_special_event(&mut self, eid: XID) {
-        self.special_event_queues.remove(&eid);
+    pub fn unregister_special_event(&self, eid: XID) {
+        self.variant.unregister_special_event(eid);
     }
 
     /// Try to get a special event without waiting for it.
     #[inline]
-    pub fn get_special_event(&mut self, eid: XID) -> Option<Event> {
-        self.special_event_queues
-            .get_mut(&eid)
-            .and_then(VecDeque::pop_front)
-    }
-
-    /// Try to get special events without waiting for them.
-    #[inline]
-    pub fn get_special_events(&mut self, eid: XID) -> impl Iterator<Item = Event> + '_ {
-        enum SpecEventIter<'a> {
-            QueueDrain(alloc::collections::vec_deque::Drain<'a, Event>),
-            Empty,
-        }
-
-        impl<'a> Iterator for SpecEventIter<'a> {
-            type Item = Event;
-
-            #[inline]
-            fn next(&mut self) -> Option<Event> {
-                match self {
-                    Self::Empty => None,
-                    Self::QueueDrain(ref mut qd) => qd.next(),
-                }
-            }
-
-            #[inline]
-            fn size_hint(&self) -> (usize, Option<usize>) {
-                match self {
-                    Self::QueueDrain(ref qd) => qd.size_hint(),
-                    Self::Empty => (0, Some(0)),
-                }
-            }
-        }
-
-        impl<'a> ExactSizeIterator for SpecEventIter<'a> {}
-
-        match self.special_event_queues.get_mut(&eid) {
-            Some(queue) => SpecEventIter::QueueDrain(queue.drain(..)),
-            None => SpecEventIter::Empty,
-        }
+    pub fn get_special_event(&self, eid: XID) -> Option<Event> {
+        self.variant.get_special_event(eid)
     }
 
     #[inline]
     fn from_connection_internal(connection: Conn) -> Self {
         Self {
-            connection: Some(connection),
+            connection,
             setup: Default::default(),
-            xid: Default::default(),
             default_screen: 0,
-            event_queue: VecDeque::with_capacity(8),
-            // setting this to 1 because breadglx with DRI3 will always append one entry to this map,
-            // and expanding this map is considered to be a cold operation
-            special_event_queues: HashMap::with_capacity(1),
-            pending_requests: HashMap::with_capacity(4),
-            pending_replies: HashMap::with_capacity(4),
-            pending_errors: HashMap::with_capacity(4),
-            request_number: 1,
-            wm_protocols_atom: None,
-            checked: cfg!(debug_assertions),
-            //            context: HashMap::new(),
-            extensions: HashMap::with_capacity(8),
+            variant: Variant::new(),
         }
     }
 
@@ -310,8 +223,8 @@ impl<Conn> Display<Conn> {
     /// Generate a unique X ID for a window, colormap, or other object. Usually, `Display`'s helper functions
     /// will generate this for you. If you'd like to circumvent them, this will generate ID's for you.
     #[inline]
-    pub fn generate_xid(&mut self) -> crate::Result<XID> {
-        Ok(self.xid.next().unwrap())
+    pub fn generate_xid(&self) -> crate::Result<XID> {
+        self.variant.generate_xid()
     }
 
     /// Get the setup associates with this display.
@@ -392,39 +305,27 @@ impl<Conn> Display<Conn> {
             })
     }
 
-    /// If there is an event currently in the queue that matches the predicate, returns true.
-    #[inline]
-    pub fn check_if_event<F: FnMut(&Event) -> bool>(&self, predicate: F) -> bool {
-        self.event_queue.iter().any(predicate)
-    }
-
     /// Set whether or not to synchronize the display after every void request to check for errors.
     /// Turning this off improves speed, but makes it difficult to match errors to certain calls.
     /// This is on by default.
     #[inline]
     pub fn set_checked(&mut self, checked: bool) {
-        self.checked = checked;
-
-        // if we're turning off checked mode, we no longer care about any of the "checked"
-        // objects in pending_requests
-        if !checked {
-            self.pending_requests.retain(|_, val| !val.flags.checked);
-        }
+        self.variant.set_checked(checked);
     }
 
     #[inline]
     pub fn checked(&self) -> bool {
-        self.checked
+        self.variant.checked()
     }
 }
 
-impl<Conn: Connection> Display<Conn> {
+impl<Conn: Connection, Variant: DisplayVariant> Display<Conn, Variant> {
     /// Forces the server to synchronize itself and send all packets.
     /// This is done by sending a `GetInputFocusRequest` to the server and discarding the reply. Once
     /// we're sure we've received the discarded `GetInputFocusReply`, we know we've successfully
     /// emptied the `pending_requests` array.
     #[inline]
-    pub fn synchronize(&mut self) -> crate::Result {
+    pub fn synchronize(&self) -> crate::Result {
         log::debug!("Synchronizing display");
         let sequence = self
             .send_request_internal(GetInputFocusRequest::default(), true)?
@@ -432,7 +333,7 @@ impl<Conn: Connection> Display<Conn> {
         // essentially a do/while loop
         while {
             self.wait()?;
-            self.pending_requests.contains_key(&sequence)
+            self.variant.pending_request_contains(sequence.into())
         } {}
 
         Ok(())
@@ -445,7 +346,7 @@ impl<Conn: Connection> Display<Conn> {
     /// that act as a wrapper around this object; however, if you'd like to circumvent those, this is usually
     /// the best option.
     #[inline]
-    pub fn send_request<R: Request>(&mut self, req: R) -> crate::Result<RequestCookie<R>> {
+    pub fn send_request<R: Request>(&self, req: R) -> crate::Result<RequestCookie<R>> {
         self.send_request_internal(req, false)
     }
 
@@ -455,21 +356,18 @@ impl<Conn: Connection> Display<Conn> {
     /// has been processed by the X11 server. If not, it polls the server for new events until it has
     /// determined that the request has resolved.
     #[inline]
-    pub fn resolve_request<R: Request>(
-        &mut self,
-        token: RequestCookie<R>,
-    ) -> crate::Result<R::Reply>
+    pub fn resolve_request<R: Request>(&self, token: RequestCookie<R>) -> crate::Result<R::Reply>
     where
         R::Reply: Default,
     {
         if mem::size_of::<R::Reply>() == 0 {
             // check the request for errors by synchronizing the connection, assuming we care about
             // that
-            if self.checked {
+            if self.checked() {
                 self.synchronize()?;
                 let seq = token.sequence();
-                self.pending_requests.remove(&seq);
-                if let Some(err) = self.pending_errors.remove(&seq) {
+                self.variant.remove_pending_request(seq.into());
+                if let Some(err) = self.variant.retrieve_pending_error(seq.into()) {
                     return Err(err);
                 }
             }
@@ -478,9 +376,7 @@ impl<Conn: Connection> Display<Conn> {
         }
 
         loop {
-            log::trace!("Current replies: {:?}", &self.pending_replies);
-
-            match self.pending_replies.remove(&token.sequence) {
+            match self.variant.retrieve_pending_reply(token.sequence.into()) {
                 Some((reply, fds)) => break Self::decode_reply::<R>(reply, fds),
                 None => self.wait()?,
             }
@@ -489,18 +385,15 @@ impl<Conn: Connection> Display<Conn> {
 
     /// Wait for a special event.
     #[inline]
-    pub fn wait_for_special_event(&mut self, eid: XID) -> crate::Result<Event> {
+    pub fn wait_for_special_event(&self, eid: XID) -> crate::Result<Event> {
         loop {
-            let queue = match self.special_event_queues.get_mut(&eid) {
-                Some(queue) => queue,
-                None => {
-                    return Err(crate::BreadError::StaticMsg(
-                        "Tried to poll a special event that didn't exist",
-                    ))
-                }
-            };
+            if !self.variant.is_queue_registered(eid) {
+                return Err(crate::BreadError::StaticMsg(
+                    "Tried to poll a special event that didn't exist",
+                ));
+            }
 
-            match queue.pop_front() {
+            match self.variant.get_special_event(eid) {
                 Some(event) => break Ok(event),
                 None => self.wait()?,
             }
@@ -556,7 +449,8 @@ impl<Conn: Connection> Display<Conn> {
         let (setup, _) =
             Setup::from_bytes(&bytes).ok_or(crate::BreadError::BadObjectRead(Some("Setup")))?;
         self.setup = setup;
-        self.xid = XidGenerator::new(self.setup.resource_id_base, self.setup.resource_id_mask);
+        self.variant
+            .set_xid_base(self.setup.resource_id_base, self.setup.resource_id_mask);
 
         log::debug!("resource_id_base is {:#032b}", self.setup.resource_id_base);
         log::debug!("resource_id_mask is {:#032b}", self.setup.resource_id_mask);
@@ -576,7 +470,7 @@ impl<Conn: Connection> Display<Conn> {
     pub fn wait_for_event(&mut self) -> crate::Result<Event> {
         log::debug!("Beginning event wait...");
         loop {
-            match self.event_queue.pop_front() {
+            match self.variant.pop_event() {
                 Some(event) => break Ok(event),
                 None => self.wait()?,
             }
@@ -585,11 +479,11 @@ impl<Conn: Connection> Display<Conn> {
 }
 
 #[cfg(feature = "async")]
-impl<Conn: AsyncConnection + Send> Display<Conn> {
+impl<Conn: AsyncConnection> Display<Conn, SyncVariant> {
     /// Forces the server to synchronize itself, async redox.
     #[inline]
     pub fn synchronize_async<'future>(
-        &'future mut self,
+        &'future self,
     ) -> Pin<Box<dyn Future<Output = crate::Result> + Send + 'future>> {
         Box::pin(async move {
             log::debug!("Synchronizing display");
@@ -597,7 +491,7 @@ impl<Conn: AsyncConnection + Send> Display<Conn> {
                 .send_request_internal_async(GetInputFocusRequest::default(), true)
                 .await?
                 .sequence();
-            while self.pending_requests.contains_key(&sequence) {
+            while self.variant.pending_request_contains(sequence.into()) {
                 self.wait_async().await?;
             }
 
@@ -609,7 +503,7 @@ impl<Conn: AsyncConnection + Send> Display<Conn> {
     /// information.
     #[inline]
     pub fn send_request_async<'future, R: Request + Send + 'future>(
-        &'future mut self,
+        &'future self,
         req: R,
     ) -> Pin<Box<dyn Future<Output = crate::Result<RequestCookie<R>>> + Send + 'future>> {
         Box::pin(self.send_request_internal_async(req, false))
@@ -619,7 +513,7 @@ impl<Conn: AsyncConnection + Send> Display<Conn> {
     /// information.
     #[inline]
     pub async fn resolve_request_async<R: Request>(
-        &mut self,
+        &self,
         token: RequestCookie<R>,
     ) -> crate::Result<R::Reply>
     where
@@ -627,11 +521,11 @@ impl<Conn: AsyncConnection + Send> Display<Conn> {
     {
         if mem::size_of::<R::Reply>() == 0 {
             // check the request for errors by synchronizing the connection
-            if self.checked {
+            if self.variant.checked() {
                 self.synchronize_async().await?;
                 let seq = token.sequence();
-                self.pending_requests.remove(&seq);
-                if let Some(err) = self.pending_errors.remove(&seq) {
+                self.variant.remove_pending_request(seq);
+                if let Some(err) = self.variant.retrieve_pending_error(seq) {
                     return Err(err);
                 };
             }
@@ -639,7 +533,7 @@ impl<Conn: AsyncConnection + Send> Display<Conn> {
         }
 
         loop {
-            match self.pending_replies.remove(&token.sequence) {
+            match self.variant.retrieve_pending_reply(token.sequence) {
                 Some((reply, fds)) => {
                     break Self::decode_reply::<R>(reply, fds);
                 }
@@ -650,18 +544,15 @@ impl<Conn: AsyncConnection + Send> Display<Conn> {
 
     /// Wait for a special event, async redox.
     #[inline]
-    pub async fn wait_for_special_event_async(&mut self, eid: XID) -> crate::Result<Event> {
+    pub async fn wait_for_special_event_async(&self, eid: XID) -> crate::Result<Event> {
         loop {
-            let queue = match self.special_event_queues.get_mut(&eid) {
-                Some(queue) => queue,
-                None => {
-                    return Err(crate::BreadError::StaticMsg(
-                        "Tried to poll a special event that didn't exist",
-                    ))
-                }
-            };
+            if !self.variant.is_queue_registered(eid) {
+                return Err(crate::BreadError::StaticMsg(
+                    "Tried to poll a special event that didn't exist",
+                ));
+            }
 
-            match queue.pop_front() {
+            match self.variant.get_special_event(eid) {
                 Some(event) => break Ok(event),
                 None => self.wait_async().await?,
             }
@@ -686,7 +577,7 @@ impl<Conn: AsyncConnection + Send> Display<Conn> {
     #[inline]
     pub async fn wait_for_event_async(&mut self) -> crate::Result<Event> {
         loop {
-            match self.event_queue.pop_front() {
+            match self.variant.pop_event() {
                 Some(event) => break Ok(event),
                 None => self.wait_async().await?,
             }
@@ -732,7 +623,8 @@ impl<Conn: AsyncConnection + Send> Display<Conn> {
         let (setup, _) = Setup::from_bytes(&bytes)
             .ok_or_else(|| crate::BreadError::BadObjectRead(Some("Setup")))?;
         self.setup = setup;
-        self.xid = XidGenerator::new(self.setup.resource_id_base, self.setup.resource_id_mask);
+        self.variant
+            .set_xid_base(self.setup.resource_id_base, self.setup.resource_id_mask);
 
         log::debug!("resource_id_base is {:#032b}", self.setup.resource_id_base);
         log::debug!("resource_id_mask is {:#032b}", self.setup.resource_id_mask);
@@ -748,13 +640,13 @@ impl<Conn: AsyncConnection + Send> Display<Conn> {
 /// A variant of `Display` that uses X11's default connection mechanisms to connect to the server. In
 /// most cases, you should be using this over any variant of `Display`.
 #[cfg(feature = "std")]
-pub type DisplayConnection = Display<name::NameConnection>;
+pub type DisplayConnection<Variant = UnsyncVariant> = Display<name::NameConnection, Variant>;
 
 #[cfg(all(feature = "std", feature = "async"))]
-pub type AsyncDisplayConnection = Display<name::AsyncNameConnection>;
+pub type AsyncDisplayConnection = Display<name::AsyncNameConnection, SyncVariant>;
 
 #[cfg(feature = "std")]
-impl DisplayConnection {
+impl<Variant: DisplayVariant> DisplayConnection<Variant> {
     /// Create a new connection to the X server, given an optional name and authorization information.
     #[inline]
     pub fn create(name: Option<Cow<'_, str>>, auth_info: Option<AuthInfo>) -> crate::Result<Self> {

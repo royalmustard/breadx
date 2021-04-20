@@ -1,23 +1,34 @@
 // MIT/Apache2 License
 
-use super::{Connection, PendingRequest, PendingRequestFlags, RequestWorkaround};
+use super::{Connection, DisplayVariant, PendingRequest, PendingRequestFlags, RequestWorkaround};
 use crate::{event::Event, util::cycled_zeroes, Fd, XID};
 use alloc::{boxed::Box, vec, vec::Vec};
 use core::iter;
 use tinyvec::TinyVec;
 
 #[cfg(feature = "async")]
-use super::AsyncConnection;
+use super::{AsyncConnection, SyncVariant};
+#[cfg(feature = "async")]
+use core::mem;
 
 const TYPE_ERROR: u8 = 0;
 const TYPE_REPLY: u8 = 1;
 const GENERIC_EVENT: u8 = 35;
 const GE_MASK: u8 = 0x7f;
 
-impl<Conn> super::Display<Conn> {
+struct Bomb;
+
+impl Drop for Bomb {
+    #[inline]
+    fn drop(&mut self) {
+        panic!("Future dropped mid-read!");
+    }
+}
+
+impl<Conn, Variant: DisplayVariant> super::Display<Conn, Variant> {
     // process a set of 32 bytes into the system
     #[inline]
-    fn process_bytes(&mut self, mut bytes: TinyVec<[u8; 32]>, fds: Box<[Fd]>) -> crate::Result {
+    fn process_bytes(&self, mut bytes: TinyVec<[u8; 32]>, fds: Box<[Fd]>) -> crate::Result {
         // get the sequence number
         let sequence = u16::from_ne_bytes([bytes[2], bytes[3]]);
         #[cfg(debug_assertions)]
@@ -27,9 +38,9 @@ impl<Conn> super::Display<Conn> {
             log::debug!("Received bytes of type REPLY");
 
             let pereq = self
-                .pending_requests
-                .remove(&sequence)
-                .ok_or(crate::BreadError::NoMatchingRequest(sequence))?;
+                .variant
+                .remove_pending_request(sequence)
+                .ok_or(crate::BreadError::NoMatchingRequest(sequence as _))?;
 
             // if we're discarding the reply, skip the conversion process
             if pereq.flags.discard_reply {
@@ -42,7 +53,7 @@ impl<Conn> super::Display<Conn> {
                     TinyVec::Inline(_) => unreachable!(),
                 };
 
-                self.pending_replies.insert(sequence, (bytes, fds));
+                self.variant.insert_pending_reply(sequence, bytes, fds);
             }
         } else if bytes[0] == TYPE_ERROR {
             // if it's all zeroes, the X connection has closed and the programmer
@@ -56,11 +67,9 @@ impl<Conn> super::Display<Conn> {
 
             // if we have a pending request with the given sequence, remove that pending
             // request and put that in the pending requests
-            match self.pending_requests.remove(&sequence) {
+            match self.variant.remove_pending_request(sequence) {
                 Some(_) => {
-                    if self.pending_errors.insert(sequence, err).is_some() {
-                        panic!("Sequence number overflow - there are too many requests");
-                    }
+                    self.variant.insert_pending_error(sequence, err);
                 }
                 // if there is no pending request, we've probably done something
                 // weird somewhere
@@ -74,7 +83,7 @@ impl<Conn> super::Display<Conn> {
             let event = Event::from_bytes(bytes)?;
             // if it doesn't fit in any of the special event queues, put it in the main one
             if let Err(event) = self.filter_into_special_event(event) {
-                self.event_queue.push_back(event);
+                self.variant.queue_event(event);
             }
         }
 
@@ -90,9 +99,9 @@ impl<Conn> super::Display<Conn> {
             // grab the pending request
             let sequence = u16::from_ne_bytes([bytes[2], bytes[3]]);
             let pereq = self
-                .pending_requests
-                .get(&sequence)
-                .ok_or(crate::BreadError::NoMatchingRequest(sequence))?;
+                .variant
+                .get_pending_request(sequence)
+                .ok_or(crate::BreadError::NoMatchingRequest(sequence as _))?;
 
             if let RequestWorkaround::GlxFbconfigBug = pereq.flags.workaround {
                 log::debug!("Applying GLX FbConfig workaround to reply");
@@ -115,18 +124,16 @@ impl<Conn> super::Display<Conn> {
 
     // add an entry to the pending elements linked list
     #[inline]
-    pub(crate) fn expect_reply(&mut self, req: u64, flags: PendingRequestFlags) {
+    pub(crate) fn expect_reply(&self, req: u16, flags: PendingRequestFlags) {
         let pereq = PendingRequest {
-            request: req,
+            request: req as _,
             flags,
         };
-        if self.pending_requests.insert(req as _, pereq).is_some() {
-            panic!("Sequence number overlap; too many requests!");
-        }
+        self.variant.insert_pending_request(req, pereq);
     }
 
     #[inline]
-    fn filter_into_special_event(&mut self, event: Event) -> Result<XID, Event> {
+    fn filter_into_special_event(&self, event: Event) -> Result<XID, Event> {
         // if the event's already differentiated, it's not a special event
         let evbytes = match event.as_byte_slice() {
             Some(evbytes) => evbytes,
@@ -142,26 +149,14 @@ impl<Conn> super::Display<Conn> {
         eid_bytes.copy_from_slice(&evbytes[12..16]);
         let my_eid = u32::from_ne_bytes(eid_bytes);
 
-        let mut event = Some(event);
-
-        self.special_event_queues
-            .iter_mut()
-            .find_map(|(eid, queue)| {
-                if *eid == my_eid {
-                    queue.push_back(event.take().expect("Infallible!"));
-                    Some(*eid)
-                } else {
-                    None
-                }
-            })
-            .ok_or_else(|| event.unwrap())
+        self.variant.try_queue_special_event(event, my_eid)
     }
 }
 
-impl<Conn: Connection> super::Display<Conn> {
+impl<Conn: Connection, Variant: DisplayVariant> super::Display<Conn, Variant> {
     // wait for bytes to appear
     #[inline]
-    pub(crate) fn wait(&mut self) -> crate::Result {
+    pub(crate) fn wait(&self) -> crate::Result {
         log::debug!("Running wait cycle");
         // replies, errors, and events are all in units of 32 bytes
         let mut bytes: TinyVec<[u8; 32]> = cycled_zeroes(32);
@@ -186,18 +181,19 @@ impl<Conn: Connection> super::Display<Conn> {
 }
 
 #[cfg(feature = "async")]
-impl<Conn: AsyncConnection + Send> super::Display<Conn> {
+impl<Conn: AsyncConnection> super::Display<Conn, SyncVariant> {
     // wait for bytes to appear, async redox
     #[inline]
-    pub(crate) async fn wait_async(&mut self) -> crate::Result {
+    pub(crate) async fn wait_async(&self) -> crate::Result {
         #[cfg(debug_assertions)]
         log::debug!("Beginning wait cycle.");
         // see above function for more information
         let mut bytes: TinyVec<[u8; 32]> = cycled_zeroes(32);
         let mut fds: Vec<Fd> = vec![];
 
-        // See output.rs for why we do this.
+        let _bomb = Bomb;
         self.connection()?.read_packet(&mut bytes, &mut fds).await?;
+        mem::forget(_bomb);
 
         self.fix_glx_workaround(&mut bytes)?;
 

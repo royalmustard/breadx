@@ -1,6 +1,10 @@
 // MIT/Apache2 License
 
 use super::auto;
+use core::cell::Cell;
+
+#[cfg(feature = "thread-safe")]
+use core::sync::atomic::{AtomicU32, Ordering};
 
 /// An X11 ID.
 #[allow(clippy::upper_case_acronyms)]
@@ -37,20 +41,20 @@ impl<T: XidType> auto::AsByteSequence for T {
 
 /// XID Generator
 #[derive(Debug, Default)]
-pub(crate) struct XidGenerator {
-    pub last: XID,
-    pub max: XID,
+pub(crate) struct XidGeneratorUnsync {
+    pub last: Cell<XID>,
+    pub max: Cell<XID>,
     pub inc: XID,
     pub base: XID,
     mask: XID,
 }
 
-impl XidGenerator {
+impl XidGeneratorUnsync {
     #[inline]
-    pub const fn new(base: XID, mask: XID) -> Self {
+    pub fn new(base: XID, mask: XID) -> Self {
         Self {
-            last: 0,
-            max: 0,
+            last: Cell::new(0),
+            max: Cell::new(0),
             base,
             inc: mask & mask.wrapping_neg(),
             mask,
@@ -58,22 +62,71 @@ impl XidGenerator {
     }
 
     #[inline]
-    pub const fn eval_in_place(&self) -> XID {
-        self.last | self.base
+    pub fn eval_in_place(&self) -> XID {
+        self.last.get() | self.base
     }
 
     #[inline]
-    pub fn next(&mut self) -> Option<XID> {
-        if self.last >= self.max.wrapping_sub(self.inc).wrapping_add(1) {
-            assert_eq!(self.last, self.max);
-            if self.last == 0 {
-                self.max = self.mask;
-                self.last = self.inc;
+    pub fn next(&self) -> Option<XID> {
+        if self.last.get() >= self.max.get().wrapping_sub(self.inc).wrapping_add(1) {
+            assert_eq!(self.last.get(), self.max.get());
+            if self.last.get() == 0 {
+                self.max.set(self.mask);
+                self.last.set(self.inc);
             } else {
                 return None;
             }
         } else {
-            self.last = self.last.wrapping_add(self.inc);
+            self.last.set(self.last.get().wrapping_add(self.inc));
+        }
+
+        Some(self.eval_in_place())
+    }
+}
+
+#[cfg(feature = "thread-safe")]
+#[derive(Debug, Default)]
+pub(crate) struct XidGeneratorSync {
+    last: AtomicU32,
+    max: AtomicU32,
+    inc: XID,
+    base: XID,
+    mask: XID,
+}
+
+#[cfg(feature = "thread-safe")]
+impl XidGeneratorSync {
+    #[inline]
+    pub fn new(base: XID, mask: XID) -> Self {
+        Self {
+            last: AtomicU32::new(0),
+            max: AtomicU32::new(0),
+            base,
+            inc: mask & mask.wrapping_neg(),
+            mask,
+        }
+    }
+
+    #[inline]
+    pub fn eval_in_place(&self) -> XID {
+        self.last.load(Ordering::SeqCst) | self.base
+    }
+
+    #[inline]
+    pub fn next(&self) -> Option<XID> {
+        let last = self.last.load(Ordering::SeqCst);
+        let max = self.max.load(Ordering::SeqCst);
+        if last >= max.wrapping_sub(self.inc).wrapping_add(1) {
+            assert_eq!(last, max);
+            if last == 0 {
+                self.max.store(self.mask, Ordering::SeqCst);
+                self.last.store(self.inc, Ordering::SeqCst);
+            } else {
+                return None;
+            }
+        } else {
+            self.last
+                .store(last.wrapping_add(self.inc), Ordering::SeqCst);
         }
 
         Some(self.eval_in_place())

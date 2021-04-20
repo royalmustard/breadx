@@ -1,13 +1,25 @@
 // MIT/Apache2 License
 
-use super::{Connection, PendingRequestFlags, RequestCookie, RequestWorkaround, EXT_KEY_SIZE};
+use super::{
+    Connection, DisplayVariant, PendingRequestFlags, RequestCookie, RequestWorkaround, EXT_KEY_SIZE,
+};
 use crate::{util::cycled_zeroes, Fd, Request};
 use alloc::{string::ToString, vec, vec::Vec};
 use core::{iter, mem};
 use tinyvec::TinyVec;
 
+// Bomb that we drop when it is tainted.
+struct Bomb;
+
+impl Drop for Bomb {
+    #[inline]
+    fn drop(&mut self) {
+        panic!("Connection future dropped mid-read and is considered tainted");
+    }
+}
+
 #[cfg(feature = "async")]
-use super::AsyncConnection;
+use super::{AsyncConnection, SyncVariant};
 
 #[inline]
 fn string_as_array_bytes(s: &str) -> [u8; EXT_KEY_SIZE] {
@@ -20,22 +32,18 @@ fn string_as_array_bytes(s: &str) -> [u8; EXT_KEY_SIZE] {
     bytes
 }
 
-impl<Conn> super::Display<Conn> {
+impl<Conn, Variant: DisplayVariant> super::Display<Conn, Variant> {
     #[inline]
     fn encode_request<R: Request>(
-        &mut self,
+        &self,
         req: &R,
         ext_opcode: Option<u8>,
         discard_reply: bool,
-    ) -> (u64, TinyVec<[u8; 32]>) {
-        let sequence = self.request_number;
-        self.request_number += 1;
-
+    ) -> (u16, TinyVec<[u8; 32]>) {
         // write to bytes
         let mut bytes: TinyVec<[u8; 32]> = cycled_zeroes(req.size());
 
         let mut len = req.as_bytes(&mut bytes);
-        log::debug!("Request is given sequence number {}", sequence);
 
         // pad to a multiple of four bytes if we can
         let remainder = len % 4;
@@ -76,7 +84,7 @@ impl<Conn> super::Display<Conn> {
         let mut flags = PendingRequestFlags {
             expects_fds: R::REPLY_EXPECTS_FDS,
             discard_reply,
-            checked: mem::size_of::<R::Reply>() == 0 && self.checked,
+            checked: mem::size_of::<R::Reply>() == 0 && self.variant.checked(),
             ..Default::default()
         };
 
@@ -103,7 +111,8 @@ impl<Conn> super::Display<Conn> {
             _ => (),
         }
 
-        if mem::size_of::<R::Reply>() != 0 || self.checked {
+        let sequence = self.variant.next_request_number();
+        if mem::size_of::<R::Reply>() != 0 || self.variant.checked() {
             self.expect_reply(sequence, flags);
         }
 
@@ -111,10 +120,10 @@ impl<Conn> super::Display<Conn> {
     }
 }
 
-impl<Conn: Connection> super::Display<Conn> {
+impl<Conn: Connection, Var: DisplayVariant> super::Display<Conn, Var> {
     #[inline]
     pub fn send_request_internal<R: Request>(
-        &mut self,
+        &self,
         mut req: R,
         discard_reply: bool,
     ) -> crate::Result<RequestCookie<R>> {
@@ -122,7 +131,8 @@ impl<Conn: Connection> super::Display<Conn> {
             None => None,
             Some(ext) => Some(self.get_ext_opcode(ext)?),
         };
-        let (sequence, bytes): (u64, TinyVec<[u8; 32]>) =
+
+        let (sequence, bytes) =
             self.encode_request(&req, ext_opcode, discard_reply);
 
         let mut _dummy: Vec<Fd> = vec![];
@@ -130,6 +140,7 @@ impl<Conn: Connection> super::Display<Conn> {
             Some(fds) => fds,
             None => &mut _dummy,
         };
+        self.variant.advance_request_number();
 
         self.connection()?.send_packet(&bytes, fds)?;
         Ok(RequestCookie::from_sequence(sequence))
@@ -137,16 +148,16 @@ impl<Conn: Connection> super::Display<Conn> {
 
     #[allow(clippy::single_match_else)]
     #[inline]
-    fn get_ext_opcode(&mut self, extname: &'static str) -> crate::Result<u8> {
+    fn get_ext_opcode(&self, extname: &'static str) -> crate::Result<u8> {
         let sarr = string_as_array_bytes(extname);
-        match self.extensions.get(&sarr) {
-            Some(code) => Ok(*code),
+        match self.variant.get_ext_opcode(&sarr) {
+            Some(code) => Ok(code),
             None => {
                 let code = self
                     .query_extension_immediate(extname.to_string())
                     .map_err(|_| crate::BreadError::ExtensionNotPresent(extname.into()))?
                     .major_opcode;
-                self.extensions.insert(sarr, code);
+                self.variant.insert_ext_opcode(sarr, code);
                 Ok(code)
             }
         }
@@ -154,10 +165,10 @@ impl<Conn: Connection> super::Display<Conn> {
 }
 
 #[cfg(feature = "async")]
-impl<Conn: AsyncConnection + Send> super::Display<Conn> {
+impl<Conn: AsyncConnection> super::Display<Conn, SyncVariant> {
     #[inline]
     pub async fn send_request_internal_async<R: Request>(
-        &mut self,
+        &self,
         mut req: R,
         discard_reply: bool,
     ) -> crate::Result<RequestCookie<R>> {
@@ -165,6 +176,7 @@ impl<Conn: AsyncConnection + Send> super::Display<Conn> {
             None => None,
             Some(ext) => Some(self.get_ext_opcode_async(ext).await?),
         };
+
         let (sequence, bytes) = self.encode_request(&req, ext_opcode, discard_reply);
 
         let mut _dummy: Vec<Fd> = vec![];
@@ -173,50 +185,27 @@ impl<Conn: AsyncConnection + Send> super::Display<Conn> {
             None => &mut _dummy,
         };
 
-        /*
-
-        This is a very ugly solution to issue #20
-
-        Consider, for a moment, if the future responsible for sending a large amount of memory to the
-        X server is dropped before it completes. This means the X server now has a portion of the bytes
-        it needs but expects more. This means that any future requests sent to the X server are now
-        "tainted" the fact that it's expecting an entirely different set of data from what our client
-        thinks it's expecting.
-
-        We'll take a page out of XCB's book here, which is "if the connection goes kaput, set an error
-        state in the connection that prevents bytes from being read or written across it." In Rust,
-        we accomplish this by setting up our connection in the Display as an Option<Connection> which,
-        in an untainted Display, should always be Some(..). In this function (and in the equivalent
-        wait_async function that handles reading), we run take() on this Option to get the connection.
-        Once send_packet_async is done, even if it finished with an error, we return the Connection
-        to its place in the display. If it isn't there, we can assume it's tainted and we can throw
-        an error.
-
-        As a side effect, the connection becomes tainted if send_packet panics. This might be desirable
-        behavior.
-
-        */
-
-        let mut connection = self.connection.take().ok_or(crate::BreadError::Tainted)?;
-        let res = connection.send_packet(&bytes, fds).await;
-        self.connection = Some(connection);
+        let _bomb = Bomb;
+        let res = self.connection()?.send_packet(&bytes, fds).await;
+        mem::forget(_bomb);
         res?;
+        self.variant.advance_request_number();
 
         Ok(RequestCookie::from_sequence(sequence))
     }
 
     #[inline]
-    async fn get_ext_opcode_async(&mut self, extname: &'static str) -> crate::Result<u8> {
+    async fn get_ext_opcode_async(&self, extname: &'static str) -> crate::Result<u8> {
         let sarr = string_as_array_bytes(extname);
-        match self.extensions.get(&sarr) {
-            Some(code) => Ok(*code),
+        match self.variant.get_ext_opcode(&sarr) {
+            Some(code) => Ok(code),
             None => {
                 let code = self
                     .query_extension_immediate_async(extname.to_string())
                     .await
                     .map_err(|_| crate::BreadError::ExtensionNotPresent(extname.into()))?
                     .major_opcode;
-                self.extensions.insert(sarr, code);
+                self.variant.insert_ext_opcode(sarr, code);
                 Ok(code)
             }
         }

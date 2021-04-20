@@ -14,12 +14,12 @@ both of the above.
 
 use crate::{
     auto::xproto::{KeyButMask, Keycode, Keysym},
-    display::{Connection, Display},
+    display::{Connection, Display, DisplayVariant},
 };
 use gluten_keyboard::Key;
 
 #[cfg(feature = "async")]
-use crate::display::AsyncConnection;
+use crate::display::{AsyncConnection, SyncVariant};
 
 mod convert;
 pub use convert::*;
@@ -44,14 +44,16 @@ impl<Km> KeyboardState<Km> {
 
 impl KeyboardState<XprotoKeymap> {
     #[inline]
-    pub fn new<Conn: Connection>(display: &mut Display<Conn>) -> crate::Result<Self> {
+    pub fn new<Conn: Connection, Var: DisplayVariant>(
+        display: &mut Display<Conn, Var>,
+    ) -> crate::Result<Self> {
         Ok(Self::from_keymap(XprotoKeymap::init_from(display)?))
     }
 
     #[cfg(feature = "async")]
     #[inline]
-    pub async fn new_async<Conn: AsyncConnection + Send>(
-        display: &mut Display<Conn>,
+    pub async fn new_async<Conn: AsyncConnection>(
+        display: &mut Display<Conn, SyncVariant>,
     ) -> crate::Result<Self> {
         Ok(Self::from_keymap(
             XprotoKeymap::init_from_async(display).await?,

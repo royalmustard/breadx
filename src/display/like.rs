@@ -45,14 +45,15 @@ use super::Display;
 ///
 /// impl<Dpy: DisplayLike> DisplayLike for Extension1Display<Dpy> {
 ///     type Connection = Dpy::Connection;
+///     type Variant = Dpy::Variant;
 ///     
 ///     #[inline]
-///     fn display(&self) -> &Display<Dpy::Connection> {
+///     fn display(&self) -> &Display<Dpy::Connection, Dpy::Variant> {
 ///         self.dpy.display()
 ///     }
 ///
 ///     #[inline]
-///     fn display_mut(&mut self) -> &mut Display<Dpy::Connection> {
+///     fn display_mut(&mut self) -> &mut Display<Dpy::Connection, Dpy::Variant> {
 ///         self.dpy.display_mut()
 ///     }
 /// }
@@ -72,13 +73,15 @@ use super::Display;
 /// ```
 pub trait DisplayLike {
     type Connection;
+    type Variant;
 
-    fn display(&self) -> &Display<Self::Connection>;
-    fn display_mut(&mut self) -> &mut Display<Self::Connection>;
+    fn display(&self) -> &Display<Self::Connection, Self::Variant>;
+    fn display_mut(&mut self) -> &mut Display<Self::Connection, Self::Variant>;
 }
 
-impl<Conn> DisplayLike for Display<Conn> {
+impl<Conn, Var> DisplayLike for Display<Conn, Var> {
     type Connection = Conn;
+    type Variant = Var;
 
     #[inline]
     fn display(&self) -> &Self {

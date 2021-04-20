@@ -1,6 +1,6 @@
 [package]
 name = "breadx"
-version = "0.3.0"
+version = "0.4.0"
 authors = ["notgull <jtnunley01@gmail.com>"]
 edition = "2018"
 description = "Implementation of the X Window System Protocol"
@@ -14,7 +14,9 @@ async-net = { version = "1.5.0", optional = true }
 blocking = { version = "1.0.2", optional = true }
 bytemuck = "1.4.1"
 cfg-if = "1"
+concurrent-queue = { version = "1.2", optional = true }
 cty = "0.2.1"
+dashmap = { version = "4", optional = true }
 futures-lite = { version = "1.11.2", optional = true }
 gluten-keyboard = "0.1.2"
 hashbrown = "0.9.1"
@@ -36,10 +38,11 @@ smol = "1.2.5"
 
 [features]
 # Optimizations and features
-default = ["std"]
-async = ["std", "async-io", "async-net", "blocking", "futures-lite"]
+default = ["std", "thread-safe"]
+async = ["std", "async-io", "async-net", "blocking", "futures-lite", "thread-safe"]
 image-support = ["image", "std"]
 std = ["memchr/std"]
+thread-safe = ["concurrent-queue", "dashmap"]
 
 # Extensions
 bigreq = []

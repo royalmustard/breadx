@@ -63,7 +63,7 @@ fn send_msg_packet(conn: RawFd, data: &[u8], fds: &mut Vec<Fd>) -> (usize, io::R
 /// For Unix stream types, we can use this function to send FDs.
 #[inline]
 pub fn send_packet_unix<Conn: AsRawFd + Write>(
-    conn: &mut Conn,
+    conn: &Conn,
     data: &[u8],
     fds: &mut Vec<Fd>,
 ) -> crate::Result {
@@ -81,7 +81,6 @@ pub async fn send_packet_unix_async<Conn: AsRawFd + Write + Unpin>(
     mut data: &[u8],
     fds: &mut Vec<Fd>,
 ) -> crate::Result {
-    // TODO: make sure this isn't unsound. the way we use it, it shouldn't be
     conn.write_with(|conn| {
         let connfd = conn.as_raw_fd();
         let (offset, res) = send_msg_packet(connfd, data, fds);
@@ -142,7 +141,7 @@ fn read_msg_packet(conn: RawFd, mut data: &mut [u8], fds: &mut Vec<Fd>) -> io::R
 /// Read a packet, unix style.
 #[inline]
 pub fn read_packet_unix<Conn: AsRawFd + Read>(
-    conn: &mut Conn,
+    conn: &Conn,
     data: &mut [u8],
     fds: &mut Vec<Fd>,
 ) -> crate::Result {

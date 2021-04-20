@@ -15,14 +15,14 @@ use crate::{
         ScreenSaver, SendEventRequest, SetAccessControlRequest, SetCloseDownModeRequest,
         SubwindowMode, Timestamp, Visualid, Window, WindowClass,
     },
-    display::{Connection, Display, RequestCookie},
+    display::{Connection, Display, DisplayVariant, RequestCookie},
     send_request, sr_request, Event, Extension,
 };
 use alloc::{boxed::Box, string::String};
 use cty::c_char;
 
 #[cfg(feature = "async")]
-use crate::display::AsyncConnection;
+use crate::display::{AsyncConnection, SyncVariant};
 
 mod colormap;
 mod cursor;
@@ -191,7 +191,7 @@ impl From<GetModifierMappingReply> for ModifierMapping {
     }
 }
 
-impl<Conn> Display<Conn> {
+impl<Conn, Var: DisplayVariant> Display<Conn, Var> {
     #[inline]
     fn create_window_request(
         wid: Window,
@@ -398,11 +398,11 @@ impl<Conn> Display<Conn> {
     }
 }
 
-impl<Conn: Connection> Display<Conn> {
+impl<Conn: Connection, Var: DisplayVariant> Display<Conn, Var> {
     /// Query for extension information.
     #[inline]
     pub fn query_extension(
-        &mut self,
+        &self,
         name: String,
     ) -> crate::Result<RequestCookie<QueryExtensionRequest>> {
         send_request!(
@@ -417,7 +417,7 @@ impl<Conn: Connection> Display<Conn> {
     /// Query for extension information, but resolve immediately. The `Error::ExtensionNotPresent` error is
     /// returned when the extension is not found.
     #[inline]
-    pub fn query_extension_immediate(&mut self, name: String) -> crate::Result<Extension> {
+    pub fn query_extension_immediate(&self, name: String) -> crate::Result<Extension> {
         let qer = sr_request!(
             self,
             QueryExtensionRequest {
@@ -431,7 +431,7 @@ impl<Conn: Connection> Display<Conn> {
     /// Create a new window.
     #[inline]
     pub fn create_window(
-        &mut self,
+        &self,
         parent: Window,
         class: WindowClass,
         depth: Option<u8>,
@@ -465,7 +465,7 @@ impl<Conn: Connection> Display<Conn> {
     /// Create a window, but assume some parameters from its parents.
     #[inline]
     pub fn create_simple_window(
-        &mut self,
+        &self,
         parent: Window,
         x: i16,
         y: i16,
@@ -494,7 +494,7 @@ impl<Conn: Connection> Display<Conn> {
     /// Create a new graphics context for the specified target.
     #[inline]
     pub fn create_gc<Target: Into<Drawable>>(
-        &mut self,
+        &self,
         target: Target,
         props: GcParameters,
     ) -> crate::Result<Gcontext> {
@@ -507,7 +507,7 @@ impl<Conn: Connection> Display<Conn> {
     /// Intern a string and get a corresponding atom for that string.
     #[inline]
     pub fn intern_atom(
-        &mut self,
+        &self,
         name: String,
         only_if_exists: bool,
     ) -> crate::Result<RequestCookie<InternAtomRequest>> {
@@ -516,24 +516,20 @@ impl<Conn: Connection> Display<Conn> {
 
     /// Intern an atom, but try to resolve the request immediately.
     #[inline]
-    pub fn intern_atom_immediate(
-        &mut self,
-        name: String,
-        only_if_exists: bool,
-    ) -> crate::Result<Atom> {
+    pub fn intern_atom_immediate(&self, name: String, only_if_exists: bool) -> crate::Result<Atom> {
         let r = self.intern_atom(name, only_if_exists)?;
         Ok(self.resolve_request(r)?.atom)
     }
 
     /// Change the keyboard's control properties.
     #[inline]
-    pub fn change_keyboard_control(&mut self, props: KbParameters) -> crate::Result<()> {
+    pub fn change_keyboard_control(&self, props: KbParameters) -> crate::Result<()> {
         let ckcr = Self::change_keyboard_control_request(props);
         sr_request!(self, ckcr)
     }
 
     #[inline]
-    pub fn bell(&mut self, percent: i8) -> crate::Result {
+    pub fn bell(&self, percent: i8) -> crate::Result {
         sr_request!(
             self,
             BellRequest {
@@ -544,7 +540,7 @@ impl<Conn: Connection> Display<Conn> {
     }
 
     #[inline]
-    pub fn set_access_control(&mut self, mode: AccessControl) -> crate::Result {
+    pub fn set_access_control(&self, mode: AccessControl) -> crate::Result {
         sr_request!(
             self,
             SetAccessControlRequest {
@@ -556,7 +552,7 @@ impl<Conn: Connection> Display<Conn> {
 
     #[inline]
     pub fn change_active_pointer_grab(
-        &mut self,
+        &self,
         event_mask: EventMask,
         cursor: Cursor,
         time: Option<Timestamp>,
@@ -568,7 +564,7 @@ impl<Conn: Connection> Display<Conn> {
     }
 
     #[inline]
-    pub fn set_close_down_mode(&mut self, mode: CloseDown) -> crate::Result {
+    pub fn set_close_down_mode(&self, mode: CloseDown) -> crate::Result {
         sr_request!(
             self,
             SetCloseDownModeRequest {
@@ -580,7 +576,7 @@ impl<Conn: Connection> Display<Conn> {
 
     #[inline]
     pub fn change_pointer_control(
-        &mut self,
+        &self,
         accel_numerator: i16,
         accel_denominator: i16,
         threshold: i16,
@@ -602,7 +598,7 @@ impl<Conn: Connection> Display<Conn> {
     /// Create a new cursor.
     #[inline]
     pub fn create_cursor(
-        &mut self,
+        &self,
         source: Pixmap,
         mask: Pixmap,
         fg_red: u16,
@@ -625,7 +621,7 @@ impl<Conn: Connection> Display<Conn> {
     }
 
     #[inline]
-    pub fn force_screensaver(&mut self, mode: ScreenSaver) -> crate::Result {
+    pub fn force_screensaver(&self, mode: ScreenSaver) -> crate::Result {
         sr_request!(
             self,
             ForceScreenSaverRequest {
@@ -637,14 +633,14 @@ impl<Conn: Connection> Display<Conn> {
 
     /// Send an event to the X server.
     #[inline]
-    pub fn send_event(&mut self, target: Window, mask: EventMask, event: Event) -> crate::Result {
+    pub fn send_event(&self, target: Window, mask: EventMask, event: Event) -> crate::Result {
         sr_request!(self, Self::send_event_request(target, mask, event))
     }
 
     /// Create a new colormap.
     #[inline]
     pub fn create_colormap(
-        &mut self,
+        &self,
         window: Window,
         visual: Visualid,
         alloc: ColormapAlloc,
@@ -659,9 +655,7 @@ impl<Conn: Connection> Display<Conn> {
 
     /// Get the keyboard mapping for this display.
     #[inline]
-    pub fn get_keyboard_mapping(
-        &mut self,
-    ) -> crate::Result<RequestCookie<GetKeyboardMappingRequest>> {
+    pub fn get_keyboard_mapping(&self) -> crate::Result<RequestCookie<GetKeyboardMappingRequest>> {
         let min_keycode = self.setup().min_keycode;
         let max_keycode = self.setup().max_keycode;
 
@@ -677,7 +671,7 @@ impl<Conn: Connection> Display<Conn> {
 
     /// Immediately get the keyboard mapping for this display.
     #[inline]
-    pub fn get_keyboard_mapping_immediate(&mut self) -> crate::Result<KeyboardMapping> {
+    pub fn get_keyboard_mapping_immediate(&self) -> crate::Result<KeyboardMapping> {
         let tok = self.get_keyboard_mapping()?;
         let repl = self.resolve_request(tok)?;
         Ok(repl.into())
@@ -685,15 +679,13 @@ impl<Conn: Connection> Display<Conn> {
 
     /// Get the modifier mapping for this display.
     #[inline]
-    pub fn get_modifier_mapping(
-        &mut self,
-    ) -> crate::Result<RequestCookie<GetModifierMappingRequest>> {
+    pub fn get_modifier_mapping(&self) -> crate::Result<RequestCookie<GetModifierMappingRequest>> {
         send_request!(self, GetModifierMappingRequest::default())
     }
 
     /// Immediately get the modifier mapping for this display.
     #[inline]
-    pub fn get_modifier_mapping_immediate(&mut self) -> crate::Result<ModifierMapping> {
+    pub fn get_modifier_mapping_immediate(&self) -> crate::Result<ModifierMapping> {
         let tok = self.get_modifier_mapping()?;
         let repl = self.resolve_request(tok)?;
         Ok(repl.into())
@@ -701,11 +693,11 @@ impl<Conn: Connection> Display<Conn> {
 }
 
 #[cfg(feature = "async")]
-impl<Conn: AsyncConnection + Send> Display<Conn> {
+impl<Conn: AsyncConnection> Display<Conn, SyncVariant> {
     /// Query for extension information, async redox.
     #[inline]
     pub async fn query_extension_async(
-        &mut self,
+        &self,
         name: String,
     ) -> crate::Result<RequestCookie<QueryExtensionRequest>> {
         send_request!(
@@ -722,10 +714,7 @@ impl<Conn: AsyncConnection + Send> Display<Conn> {
     /// Query for extension information, but resolve immediately, async redox . The `Error::ExtensionNotPresent`
     /// error is returned when the extension is not found.
     #[inline]
-    pub async fn query_extension_immediate_async(
-        &mut self,
-        name: String,
-    ) -> crate::Result<Extension> {
+    pub async fn query_extension_immediate_async(&self, name: String) -> crate::Result<Extension> {
         let qer = sr_request!(
             self,
             QueryExtensionRequest {
@@ -741,7 +730,7 @@ impl<Conn: AsyncConnection + Send> Display<Conn> {
     /// Create a new window, async redox.
     #[inline]
     pub async fn create_window_async(
-        &mut self,
+        &self,
         parent: Window,
         class: WindowClass,
         depth: Option<u8>,
@@ -775,7 +764,7 @@ impl<Conn: AsyncConnection + Send> Display<Conn> {
     /// Create a window, but assume some parameters from its parents, async redox.
     #[inline]
     pub async fn create_simple_window_async(
-        &mut self,
+        &self,
         parent: Window,
         x: i16,
         y: i16,
@@ -805,7 +794,7 @@ impl<Conn: AsyncConnection + Send> Display<Conn> {
     /// Create a new graphics context, async redox.
     #[inline]
     pub async fn create_gc_async<Target: Into<Drawable>>(
-        &mut self,
+        &self,
         target: Target,
         props: GcParameters,
     ) -> crate::Result<Gcontext> {
@@ -818,7 +807,7 @@ impl<Conn: AsyncConnection + Send> Display<Conn> {
     /// Intern a string and get a corresponding atom for that string, async redox.
     #[inline]
     pub async fn intern_atom_async(
-        &mut self,
+        &self,
         name: String,
         only_if_exists: bool,
     ) -> crate::Result<RequestCookie<InternAtomRequest>> {
@@ -828,7 +817,7 @@ impl<Conn: AsyncConnection + Send> Display<Conn> {
     /// Intern an atom, but try to resolve the request immediately, async redox.
     #[inline]
     pub async fn intern_atom_immediate_async(
-        &mut self,
+        &self,
         name: String,
         only_if_exists: bool,
     ) -> crate::Result<Atom> {
@@ -838,16 +827,13 @@ impl<Conn: AsyncConnection + Send> Display<Conn> {
 
     /// Change the keyboard's control properties, async redox.
     #[inline]
-    pub async fn change_keyboard_control_async(
-        &mut self,
-        props: KbParameters,
-    ) -> crate::Result<()> {
+    pub async fn change_keyboard_control_async(&self, props: KbParameters) -> crate::Result<()> {
         let ckcr = Self::change_keyboard_control_request(props);
         sr_request!(self, ckcr, async).await
     }
 
     #[inline]
-    pub async fn bell_async(&mut self, percent: i8) -> crate::Result {
+    pub async fn bell_async(&self, percent: i8) -> crate::Result {
         sr_request!(
             self,
             BellRequest {
@@ -860,7 +846,7 @@ impl<Conn: AsyncConnection + Send> Display<Conn> {
     }
 
     #[inline]
-    pub async fn set_access_control_async(&mut self, mode: AccessControl) -> crate::Result {
+    pub async fn set_access_control_async(&self, mode: AccessControl) -> crate::Result {
         sr_request!(
             self,
             SetAccessControlRequest {
@@ -874,7 +860,7 @@ impl<Conn: AsyncConnection + Send> Display<Conn> {
 
     #[inline]
     pub async fn change_active_pointer_grab_async(
-        &mut self,
+        &self,
         event_mask: EventMask,
         cursor: Cursor,
         time: Option<Timestamp>,
@@ -888,7 +874,7 @@ impl<Conn: AsyncConnection + Send> Display<Conn> {
     }
 
     #[inline]
-    pub async fn set_close_down_mode_async(&mut self, mode: CloseDown) -> crate::Result {
+    pub async fn set_close_down_mode_async(&self, mode: CloseDown) -> crate::Result {
         sr_request!(
             self,
             SetCloseDownModeRequest {
@@ -902,7 +888,7 @@ impl<Conn: AsyncConnection + Send> Display<Conn> {
 
     #[inline]
     pub async fn change_pointer_control_async(
-        &mut self,
+        &self,
         accel_numerator: i16,
         accel_denominator: i16,
         threshold: i16,
@@ -926,7 +912,7 @@ impl<Conn: AsyncConnection + Send> Display<Conn> {
     /// Create a new cursor, async redox.
     #[inline]
     pub async fn create_cursor_async(
-        &mut self,
+        &self,
         source: Pixmap,
         mask: Pixmap,
         fg_red: u16,
@@ -951,7 +937,7 @@ impl<Conn: AsyncConnection + Send> Display<Conn> {
     }
 
     #[inline]
-    pub async fn force_screensaver_async(&mut self, mode: ScreenSaver) -> crate::Result {
+    pub async fn force_screensaver_async(&self, mode: ScreenSaver) -> crate::Result {
         sr_request!(
             self,
             ForceScreenSaverRequest {
@@ -967,7 +953,7 @@ impl<Conn: AsyncConnection + Send> Display<Conn> {
     #[cfg(feature = "async")]
     #[inline]
     pub async fn send_event_async(
-        &mut self,
+        &self,
         target: Window,
         mask: EventMask,
         event: Event,
@@ -978,7 +964,7 @@ impl<Conn: AsyncConnection + Send> Display<Conn> {
     /// Create a new colormap, async redox.
     #[inline]
     pub async fn create_colormap_async(
-        &mut self,
+        &self,
         window: Window,
         visual: Visualid,
         alloc: ColormapAlloc,
@@ -996,7 +982,7 @@ impl<Conn: AsyncConnection + Send> Display<Conn> {
     /// Get the keyboard mapping for this display, async redox.
     #[inline]
     pub async fn get_keyboard_mapping_async(
-        &mut self,
+        &self,
     ) -> crate::Result<RequestCookie<GetKeyboardMappingRequest>> {
         let min_keycode = self.setup().min_keycode;
         let max_keycode = self.setup().max_keycode;
@@ -1015,7 +1001,7 @@ impl<Conn: AsyncConnection + Send> Display<Conn> {
 
     /// Immediately get the keyboard mapping for this display, async redox.
     #[inline]
-    pub async fn get_keyboard_mapping_immediate_async(&mut self) -> crate::Result<KeyboardMapping> {
+    pub async fn get_keyboard_mapping_immediate_async(&self) -> crate::Result<KeyboardMapping> {
         let tok = self.get_keyboard_mapping_async().await?;
         let repl = self.resolve_request_async(tok).await?;
         Ok(repl.into())
@@ -1024,14 +1010,14 @@ impl<Conn: AsyncConnection + Send> Display<Conn> {
     /// Get the modifier mapping for this display, async redox.
     #[inline]
     pub async fn get_modifier_mapping_async(
-        &mut self,
+        &self,
     ) -> crate::Result<RequestCookie<GetModifierMappingRequest>> {
         send_request!(self, GetModifierMappingRequest::default(), async).await
     }
 
     /// Immediately get the modifier mapping for this display.
     #[inline]
-    pub async fn get_modifier_mapping_immediate_async(&mut self) -> crate::Result<ModifierMapping> {
+    pub async fn get_modifier_mapping_immediate_async(&self) -> crate::Result<ModifierMapping> {
         let tok = self.get_modifier_mapping_async().await?;
         let repl = self.resolve_request_async(tok).await?;
         Ok(repl.into())

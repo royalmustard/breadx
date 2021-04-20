@@ -6,11 +6,11 @@ use crate::{
         PolyArcRequest, PolyFillArcRequest, PolyFillRectangleRequest, PolyRectangleRequest,
         PolySegmentRequest, PolyShape, Rectangle, Segment,
     },
-    sr_request, Connection, Display, GcParameters,
+    sr_request, Connection, Display, DisplayVariant, GcParameters,
 };
 
 #[cfg(feature = "async")]
-use crate::display::AsyncConnection;
+use crate::display::{AsyncConnection, SyncVariant};
 
 impl Gcontext {
     #[inline]
@@ -27,9 +27,9 @@ impl Gcontext {
 
     /// Change the properties of this GC.
     #[inline]
-    pub fn change<Conn: Connection>(
+    pub fn change<Conn: Connection, Var: DisplayVariant>(
         self,
-        dpy: &mut Display<Conn>,
+        dpy: &Display<Conn, Var>,
         params: GcParameters,
     ) -> crate::Result<()> {
         sr_request!(dpy, self.change_request(params))
@@ -38,9 +38,9 @@ impl Gcontext {
     /// Change the properties of this GC, async redox.
     #[cfg(feature = "async")]
     #[inline]
-    pub async fn change_async<Conn: AsyncConnection + Send + Send>(
+    pub async fn change_async<Conn: AsyncConnection + Send>(
         self,
-        dpy: &mut Display<Conn>,
+        dpy: &Display<Conn, SyncVariant>,
         params: GcParameters,
     ) -> crate::Result<()> {
         sr_request!(dpy, self.change_request(params), async).await
@@ -59,9 +59,9 @@ impl Gcontext {
 
     /// Draw a set of lines.
     #[inline]
-    pub fn draw_lines<Conn: Connection, Target: Into<Drawable>>(
+    pub fn draw_lines<Conn: Connection, Var: DisplayVariant, Target: Into<Drawable>>(
         self,
-        dpy: &mut Display<Conn>,
+        dpy: &Display<Conn, Var>,
         target: Target,
         line: &[Segment],
     ) -> crate::Result {
@@ -75,9 +75,9 @@ impl Gcontext {
     /// Draw a set of lines, async redox.
     #[cfg(feature = "async")]
     #[inline]
-    pub async fn draw_lines_async<Conn: AsyncConnection + Send + Send, Target: Into<Drawable>>(
+    pub async fn draw_lines_async<Conn: AsyncConnection + Send, Target: Into<Drawable>>(
         self,
-        dpy: &mut Display<Conn>,
+        dpy: &Display<Conn, SyncVariant>,
         target: Target,
         line: &[Segment],
     ) -> crate::Result {
@@ -90,9 +90,9 @@ impl Gcontext {
 
     /// Draw a singular line.
     #[inline]
-    pub fn draw_line<Conn: Connection, Target: Into<Drawable>>(
+    pub fn draw_line<Conn: Connection, Var: DisplayVariant, Target: Into<Drawable>>(
         self,
-        dpy: &mut Display<Conn>,
+        dpy: &Display<Conn, Var>,
         target: Target,
         line: Segment,
     ) -> crate::Result {
@@ -102,9 +102,9 @@ impl Gcontext {
     /// Draw a singular line, async redox.
     #[cfg(feature = "async")]
     #[inline]
-    pub async fn draw_line_async<Conn: AsyncConnection + Send + Send, Target: Into<Drawable>>(
+    pub async fn draw_line_async<Conn: AsyncConnection + Send, Target: Into<Drawable>>(
         self,
-        dpy: &mut Display<Conn>,
+        dpy: &Display<Conn, SyncVariant>,
         target: Target,
         line: Segment,
     ) -> crate::Result {
@@ -128,9 +128,9 @@ impl Gcontext {
 
     /// Draw one or more rectangles to the screen.
     #[inline]
-    pub fn draw_rectangles<Conn: Connection, Target: Into<Drawable>>(
+    pub fn draw_rectangles<Conn: Connection, Var: DisplayVariant, Target: Into<Drawable>>(
         self,
-        dpy: &mut Display<Conn>,
+        dpy: &Display<Conn, Var>,
         target: Target,
         rectangles: &[Rectangle],
     ) -> crate::Result<()> {
@@ -144,12 +144,9 @@ impl Gcontext {
     /// Draw one or more rectangles to the screen, async redox.
     #[cfg(feature = "async")]
     #[inline]
-    pub async fn draw_rectangles_async<
-        Conn: AsyncConnection + Send + Send,
-        Target: Into<Drawable>,
-    >(
+    pub async fn draw_rectangles_async<Conn: AsyncConnection + Send, Target: Into<Drawable>>(
         self,
-        dpy: &mut Display<Conn>,
+        dpy: &Display<Conn, SyncVariant>,
         target: Target,
         rectangles: &[Rectangle],
     ) -> crate::Result<()> {
@@ -167,9 +164,9 @@ impl Gcontext {
 
     /// Draw a rectangle to the screen.
     #[inline]
-    pub fn draw_rectangle<Conn: Connection, Target: Into<Drawable>>(
+    pub fn draw_rectangle<Conn: Connection, Var: DisplayVariant, Target: Into<Drawable>>(
         self,
-        dpy: &mut Display<Conn>,
+        dpy: &Display<Conn, Var>,
         target: Target,
         rectangle: Rectangle,
     ) -> crate::Result<()> {
@@ -179,9 +176,9 @@ impl Gcontext {
     /// Draw a rectangle to the screen, async redox.
     #[cfg(feature = "async")]
     #[inline]
-    pub async fn draw_rectangle_async<Conn: AsyncConnection + Send, Target: Into<Drawable>>(
+    pub async fn draw_rectangle_async<Conn: AsyncConnection, Target: Into<Drawable>>(
         self,
-        dpy: &mut Display<Conn>,
+        dpy: &Display<Conn, SyncVariant>,
         target: Target,
         rectangle: Rectangle,
     ) -> crate::Result<()> {
@@ -201,9 +198,9 @@ impl Gcontext {
 
     /// Draw one or more arcs to the screen.
     #[inline]
-    pub fn draw_arcs<Conn: Connection, Target: Into<Drawable>>(
+    pub fn draw_arcs<Conn: Connection, Var: DisplayVariant, Target: Into<Drawable>>(
         self,
-        dpy: &mut Display<Conn>,
+        dpy: &Display<Conn, Var>,
         target: Target,
         arcs: &[Arc],
     ) -> crate::Result {
@@ -217,9 +214,9 @@ impl Gcontext {
     /// Draw one or more arcs to the screen, async redox.
     #[cfg(feature = "async")]
     #[inline]
-    pub async fn draw_arcs_async<Conn: AsyncConnection + Send, Target: Into<Drawable>>(
+    pub async fn draw_arcs_async<Conn: AsyncConnection, Target: Into<Drawable>>(
         self,
-        dpy: &mut Display<Conn>,
+        dpy: &Display<Conn, SyncVariant>,
         target: Target,
         arcs: &[Arc],
     ) -> crate::Result {
@@ -232,9 +229,9 @@ impl Gcontext {
 
     /// Draw an arc to the screen.
     #[inline]
-    pub fn draw_arc<Conn: Connection, Target: Into<Drawable>>(
+    pub fn draw_arc<Conn: Connection, Var: DisplayVariant, Target: Into<Drawable>>(
         self,
-        dpy: &mut Display<Conn>,
+        dpy: &Display<Conn, Var>,
         target: Target,
         arc: Arc,
     ) -> crate::Result {
@@ -244,9 +241,9 @@ impl Gcontext {
     /// Draw an arc to the screen, async redox.
     #[cfg(feature = "async")]
     #[inline]
-    pub async fn draw_arc_async<Conn: AsyncConnection + Send, Target: Into<Drawable>>(
+    pub async fn draw_arc_async<Conn: AsyncConnection, Target: Into<Drawable>>(
         self,
-        dpy: &mut Display<Conn>,
+        dpy: &Display<Conn, SyncVariant>,
         target: Target,
         arc: Arc,
     ) -> crate::Result {
@@ -274,9 +271,9 @@ impl Gcontext {
 
     /// Fill a polygon specified by the given points.
     #[inline]
-    pub fn fill_polygon<Conn: Connection, Target: Into<Drawable>>(
+    pub fn fill_polygon<Conn: Connection, Var: DisplayVariant, Target: Into<Drawable>>(
         self,
-        dpy: &mut Display<Conn>,
+        dpy: &Display<Conn, Var>,
         target: Target,
         shape: PolyShape,
         coordinate_mode: CoordMode,
@@ -295,9 +292,9 @@ impl Gcontext {
     /// Fill a polygon specified by the given points, async redox.
     #[cfg(feature = "async")]
     #[inline]
-    pub async fn fill_polygon_async<Conn: AsyncConnection + Send, Target: Into<Drawable>>(
+    pub async fn fill_polygon_async<Conn: AsyncConnection, Target: Into<Drawable>>(
         self,
-        dpy: &mut Display<Conn>,
+        dpy: &Display<Conn, SyncVariant>,
         target: Target,
         shape: PolyShape,
         coordinate_mode: CoordMode,
@@ -332,9 +329,9 @@ impl Gcontext {
 
     /// Fill a set of one or more rectangles.
     #[inline]
-    pub fn fill_rectangles<Conn: Connection, Target: Into<Drawable>>(
+    pub fn fill_rectangles<Conn: Connection, Var: DisplayVariant, Target: Into<Drawable>>(
         self,
-        dpy: &mut Display<Conn>,
+        dpy: &Display<Conn, Var>,
         target: Target,
         rectangles: &[Rectangle],
     ) -> crate::Result {
@@ -351,9 +348,9 @@ impl Gcontext {
     /// Fill a set of one or more rectangles, async redox.
     #[cfg(feature = "async")]
     #[inline]
-    pub async fn fill_rectangles_async<Conn: AsyncConnection + Send, Target: Into<Drawable>>(
+    pub async fn fill_rectangles_async<Conn: AsyncConnection, Target: Into<Drawable>>(
         self,
-        dpy: &mut Display<Conn>,
+        dpy: &Display<Conn, SyncVariant>,
         target: Target,
         rectangles: &[Rectangle],
     ) -> crate::Result {
@@ -371,9 +368,9 @@ impl Gcontext {
 
     /// Fill a single rectangle.
     #[inline]
-    pub fn fill_rectangle<Conn: Connection, Target: Into<Drawable>>(
+    pub fn fill_rectangle<Conn: Connection, Var: DisplayVariant, Target: Into<Drawable>>(
         self,
-        dpy: &mut Display<Conn>,
+        dpy: &Display<Conn, Var>,
         target: Target,
         rectangle: Rectangle,
     ) -> crate::Result {
@@ -383,9 +380,9 @@ impl Gcontext {
     /// Fill a single rectangle, async redox.
     #[cfg(feature = "async")]
     #[inline]
-    pub async fn fill_rectangle_async<Conn: AsyncConnection + Send, Target: Into<Drawable>>(
+    pub async fn fill_rectangle_async<Conn: AsyncConnection, Target: Into<Drawable>>(
         self,
-        dpy: &mut Display<Conn>,
+        dpy: &Display<Conn, SyncVariant>,
         target: Target,
         rectangle: Rectangle,
     ) -> crate::Result {
@@ -405,9 +402,9 @@ impl Gcontext {
 
     /// Fill a set of one or more arcs.
     #[inline]
-    pub fn fill_arcs<Conn: Connection, Target: Into<Drawable>>(
+    pub fn fill_arcs<Conn: Connection, Var: DisplayVariant, Target: Into<Drawable>>(
         self,
-        dpy: &mut Display<Conn>,
+        dpy: &Display<Conn, Var>,
         target: Target,
         arcs: &[Arc],
     ) -> crate::Result {
@@ -421,9 +418,9 @@ impl Gcontext {
     /// Fill a set of one or more arcs, async redox.
     #[cfg(feature = "async")]
     #[inline]
-    pub async fn fill_arcs_async<Conn: AsyncConnection + Send, Target: Into<Drawable>>(
+    pub async fn fill_arcs_async<Conn: AsyncConnection, Target: Into<Drawable>>(
         self,
-        dpy: &mut Display<Conn>,
+        dpy: &Display<Conn, SyncVariant>,
         target: Target,
         arcs: &[Arc],
     ) -> crate::Result {
@@ -436,9 +433,9 @@ impl Gcontext {
 
     /// Fill an arc.
     #[inline]
-    pub fn fill_arc<Conn: Connection, Target: Into<Drawable>>(
+    pub fn fill_arc<Conn: Connection, Var: DisplayVariant, Target: Into<Drawable>>(
         self,
-        dpy: &mut Display<Conn>,
+        dpy: &Display<Conn, Var>,
         target: Target,
         arc: Arc,
     ) -> crate::Result {
@@ -448,9 +445,9 @@ impl Gcontext {
     /// Fill an arc, async redox.
     #[cfg(feature = "async")]
     #[inline]
-    pub async fn fill_arc_async<Conn: AsyncConnection + Send, Target: Into<Drawable>>(
+    pub async fn fill_arc_async<Conn: AsyncConnection, Target: Into<Drawable>>(
         self,
-        dpy: &mut Display<Conn>,
+        dpy: &Display<Conn, SyncVariant>,
         target: Target,
         arc: Arc,
     ) -> crate::Result {
@@ -460,7 +457,10 @@ impl Gcontext {
     /// Free the memory this GC allocates. Note that this will cause future requests involving this GC
     /// to fail.
     #[inline]
-    pub fn free<Conn: Connection>(self, dpy: &mut Display<Conn>) -> crate::Result {
+    pub fn free<Conn: Connection, Var: DisplayVariant>(
+        self,
+        dpy: &Display<Conn, Var>,
+    ) -> crate::Result {
         sr_request!(
             dpy,
             FreeGcRequest {
@@ -473,9 +473,9 @@ impl Gcontext {
     /// Free the memory this GC allocates, async redox.
     #[cfg(feature = "async")]
     #[inline]
-    pub async fn free_async<Conn: AsyncConnection + Send>(
+    pub async fn free_async<Conn: AsyncConnection>(
         self,
-        dpy: &mut Display<Conn>,
+        dpy: &Display<Conn, SyncVariant>,
     ) -> crate::Result {
         sr_request!(
             dpy,

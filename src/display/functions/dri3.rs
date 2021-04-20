@@ -14,7 +14,7 @@ use crate::{
         xproto::Drawable,
         AsByteSequence,
     },
-    display::{Connection, Display, RequestCookie},
+    display::{Connection, Display, DisplayVariant, RequestCookie},
     extension::ExtensionVersion,
     send_request, sr_request, Fd, Pixmap, Window,
 };
@@ -22,7 +22,7 @@ use alloc::{vec, vec::Vec};
 use cty::c_int;
 
 #[cfg(feature = "async")]
-use crate::display::AsyncConnection;
+use crate::display::{AsyncConnection, SyncVariant};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Modifiers {
@@ -30,7 +30,7 @@ pub struct Modifiers {
     pub screen: Vec<u64>,
 }
 
-impl<Conn> Display<Conn> {
+impl<Conn, Var> Display<Conn, Var> {
     #[inline]
     fn open_dri3_request(drawable: Drawable, provider: u32) -> OpenRequest {
         OpenRequest {
@@ -41,11 +41,11 @@ impl<Conn> Display<Conn> {
     }
 }
 
-impl<Conn: Connection> Display<Conn> {
+impl<Conn: Connection, Var: DisplayVariant> Display<Conn, Var> {
     /// Open the DRI3 interface.
     #[inline]
     pub fn open_dri3<Target: Into<Drawable>>(
-        &mut self,
+        &self,
         drawable: Target,
         provider: u32,
     ) -> crate::Result<RequestCookie<OpenRequest>> {
@@ -54,7 +54,7 @@ impl<Conn: Connection> Display<Conn> {
 
     #[inline]
     pub fn open_dri3_immediate<Target: Into<Drawable>>(
-        &mut self,
+        &self,
         drawable: Target,
         provider: u32,
     ) -> crate::Result<c_int> {
@@ -65,7 +65,7 @@ impl<Conn: Connection> Display<Conn> {
 
     #[inline]
     pub fn query_dri3_version(
-        &mut self,
+        &self,
         major: u32,
         minor: u32,
     ) -> crate::Result<RequestCookie<QueryVersionRequest>> {
@@ -81,7 +81,7 @@ impl<Conn: Connection> Display<Conn> {
 
     #[inline]
     pub fn query_dri3_version_immediate(
-        &mut self,
+        &self,
         major: u32,
         minor: u32,
     ) -> crate::Result<ExtensionVersion> {
@@ -95,7 +95,7 @@ impl<Conn: Connection> Display<Conn> {
 
     #[inline]
     pub fn get_supported_modifiers(
-        &mut self,
+        &self,
         window: u32,
         depth: u8,
         bpp: u8,
@@ -113,7 +113,7 @@ impl<Conn: Connection> Display<Conn> {
 
     #[inline]
     pub fn get_supported_modifiers_immediate(
-        &mut self,
+        &self,
         window: u32,
         depth: u8,
         bpp: u8,
@@ -132,7 +132,7 @@ impl<Conn: Connection> Display<Conn> {
 
     #[inline]
     pub fn pixmap_from_buffers(
-        &mut self,
+        &self,
         window: Window,
         width: u16,
         height: u16,
@@ -172,7 +172,7 @@ impl<Conn: Connection> Display<Conn> {
 
     #[inline]
     pub fn pixmap_from_buffer(
-        &mut self,
+        &self,
         drawable: Drawable,
         size: u32,
         width: u16,
@@ -203,7 +203,7 @@ impl<Conn: Connection> Display<Conn> {
 
     #[inline]
     pub fn fence_from_fd(
-        &mut self,
+        &self,
         drawable: Drawable,
         initially_triggered: bool,
         fence_fd: Fd,
@@ -224,7 +224,7 @@ impl<Conn: Connection> Display<Conn> {
 
     #[inline]
     pub fn buffer_from_pixmap(
-        &mut self,
+        &self,
         pixmap: Pixmap,
     ) -> crate::Result<RequestCookie<BufferFromPixmapRequest>> {
         send_request!(
@@ -238,7 +238,7 @@ impl<Conn: Connection> Display<Conn> {
 
     #[inline]
     pub fn buffer_from_pixmap_immediate(
-        &mut self,
+        &self,
         pixmap: Pixmap,
     ) -> crate::Result<BufferFromPixmapReply> {
         let bfp = self.buffer_from_pixmap(pixmap)?;
@@ -247,7 +247,7 @@ impl<Conn: Connection> Display<Conn> {
 
     #[inline]
     pub fn buffers_from_pixmap(
-        &mut self,
+        &self,
         pixmap: Pixmap,
     ) -> crate::Result<RequestCookie<BuffersFromPixmapRequest>> {
         send_request!(
@@ -261,7 +261,7 @@ impl<Conn: Connection> Display<Conn> {
 
     #[inline]
     pub fn buffers_from_pixmap_immediate(
-        &mut self,
+        &self,
         pixmap: Pixmap,
     ) -> crate::Result<BuffersFromPixmapReply> {
         let bfp = self.buffers_from_pixmap(pixmap)?;
@@ -270,10 +270,10 @@ impl<Conn: Connection> Display<Conn> {
 }
 
 #[cfg(feature = "async")]
-impl<Conn: AsyncConnection + Send> Display<Conn> {
+impl<Conn: AsyncConnection> Display<Conn, SyncVariant> {
     #[inline]
     pub async fn open_dri3_async<Target: Into<Drawable>>(
-        &mut self,
+        &self,
         drawable: Target,
         provider: u32,
     ) -> crate::Result<RequestCookie<OpenRequest>> {
@@ -287,7 +287,7 @@ impl<Conn: AsyncConnection + Send> Display<Conn> {
 
     #[inline]
     pub async fn open_dri3_immediate_async<Target: Into<Drawable>>(
-        &mut self,
+        &self,
         drawable: Target,
         provider: u32,
     ) -> crate::Result<c_int> {
@@ -298,7 +298,7 @@ impl<Conn: AsyncConnection + Send> Display<Conn> {
 
     #[inline]
     pub async fn query_dri3_version_async(
-        &mut self,
+        &self,
         major: u32,
         minor: u32,
     ) -> crate::Result<RequestCookie<QueryVersionRequest>> {
@@ -316,7 +316,7 @@ impl<Conn: AsyncConnection + Send> Display<Conn> {
 
     #[inline]
     pub async fn query_dri3_version_immediate_async(
-        &mut self,
+        &self,
         major: u32,
         minor: u32,
     ) -> crate::Result<ExtensionVersion> {
@@ -330,7 +330,7 @@ impl<Conn: AsyncConnection + Send> Display<Conn> {
 
     #[inline]
     pub async fn get_supported_modifiers_async(
-        &mut self,
+        &self,
         window: u32,
         depth: u8,
         bpp: u8,
@@ -350,7 +350,7 @@ impl<Conn: AsyncConnection + Send> Display<Conn> {
 
     #[inline]
     pub async fn get_supported_modifiers_immediate_async(
-        &mut self,
+        &self,
         window: u32,
         depth: u8,
         bpp: u8,
@@ -371,7 +371,7 @@ impl<Conn: AsyncConnection + Send> Display<Conn> {
 
     #[inline]
     pub async fn pixmap_from_buffers_async(
-        &mut self,
+        &self,
         window: Window,
         width: u16,
         height: u16,
@@ -413,7 +413,7 @@ impl<Conn: AsyncConnection + Send> Display<Conn> {
 
     #[inline]
     pub async fn pixmap_from_buffer_async(
-        &mut self,
+        &self,
         drawable: Drawable,
         size: u32,
         width: u16,
@@ -446,7 +446,7 @@ impl<Conn: AsyncConnection + Send> Display<Conn> {
 
     #[inline]
     pub async fn fence_from_fd_async(
-        &mut self,
+        &self,
         drawable: Drawable,
         initially_triggered: bool,
         fence_fd: Fd,
@@ -469,7 +469,7 @@ impl<Conn: AsyncConnection + Send> Display<Conn> {
 
     #[inline]
     pub async fn buffer_from_pixmap_async(
-        &mut self,
+        &self,
         pixmap: Pixmap,
     ) -> crate::Result<RequestCookie<BufferFromPixmapRequest>> {
         send_request!(
@@ -485,7 +485,7 @@ impl<Conn: AsyncConnection + Send> Display<Conn> {
 
     #[inline]
     pub async fn buffer_from_pixmap_immediate_async(
-        &mut self,
+        &self,
         pixmap: Pixmap,
     ) -> crate::Result<BufferFromPixmapReply> {
         let bfp = self.buffer_from_pixmap_async(pixmap).await?;
@@ -494,7 +494,7 @@ impl<Conn: AsyncConnection + Send> Display<Conn> {
 
     #[inline]
     pub async fn buffers_from_pixmap_async(
-        &mut self,
+        &self,
         pixmap: Pixmap,
     ) -> crate::Result<RequestCookie<BuffersFromPixmapRequest>> {
         send_request!(
@@ -510,7 +510,7 @@ impl<Conn: AsyncConnection + Send> Display<Conn> {
 
     #[inline]
     pub async fn buffers_from_pixmap_immediate_async(
-        &mut self,
+        &self,
         pixmap: Pixmap,
     ) -> crate::Result<BuffersFromPixmapReply> {
         let bfp = self.buffers_from_pixmap_async(pixmap).await?;

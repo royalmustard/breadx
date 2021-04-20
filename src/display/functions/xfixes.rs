@@ -5,17 +5,17 @@ use crate::{
         xfixes::{CreateRegionRequest, DestroyRegionRequest, Region},
         xproto::Rectangle,
     },
-    display::{Connection, Display},
+    display::{Connection, Display, DisplayVariant},
     sr_request,
 };
 use alloc::vec::Vec;
 
 #[cfg(feature = "async")]
-use crate::display::AsyncConnection;
+use crate::display::{AsyncConnection, SyncVariant};
 
-impl<Conn: Connection> Display<Conn> {
+impl<Conn: Connection, Var: DisplayVariant> Display<Conn, Var> {
     #[inline]
-    pub fn create_region(&mut self, rectangles: Vec<Rectangle>) -> crate::Result<Region> {
+    pub fn create_region(&self, rectangles: Vec<Rectangle>) -> crate::Result<Region> {
         let xid = Region::const_from_xid(self.generate_xid()?);
         sr_request!(
             self,
@@ -30,12 +30,9 @@ impl<Conn: Connection> Display<Conn> {
 }
 
 #[cfg(feature = "async")]
-impl<Conn: AsyncConnection + Send> Display<Conn> {
+impl<Conn: AsyncConnection> Display<Conn, SyncVariant> {
     #[inline]
-    pub async fn create_region_async(
-        &mut self,
-        rectangles: Vec<Rectangle>,
-    ) -> crate::Result<Region> {
+    pub async fn create_region_async(&self, rectangles: Vec<Rectangle>) -> crate::Result<Region> {
         let xid = Region::const_from_xid(self.generate_xid()?);
         sr_request!(
             self,
@@ -53,7 +50,7 @@ impl<Conn: AsyncConnection + Send> Display<Conn> {
 
 impl Region {
     #[inline]
-    pub fn destroy<Conn: Connection>(self, dpy: &mut Display<Conn>) -> crate::Result {
+    pub fn destroy<Conn: Connection, Var: DisplayVariant>(self, dpy: &mut Display<Conn, Var>) -> crate::Result {
         sr_request!(
             dpy,
             DestroyRegionRequest {
@@ -65,9 +62,9 @@ impl Region {
 
     #[cfg(feature = "async")]
     #[inline]
-    pub async fn destroy_async<Conn: AsyncConnection + Send>(
+    pub async fn destroy_async<Conn: AsyncConnection>(
         self,
-        dpy: &mut Display<Conn>,
+        dpy: &mut Display<Conn, SyncVariant>,
     ) -> crate::Result {
         sr_request!(
             dpy,

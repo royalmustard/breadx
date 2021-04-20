@@ -9,12 +9,12 @@ use crate::{
         },
         xproto::{Atom, Pixmap, Rectangle, SubwindowMode},
     },
-    display::{Connection, Display},
+    display::{Connection, Display, DisplayVariant},
     sr_request,
 };
 
 #[cfg(feature = "async")]
-use crate::display::AsyncConnection;
+use crate::display::{AsyncConnection, SyncVariant};
 
 crate::create_paramaterizer! {
     pub struct PictureParameters : (Cp, CreatePictureRequest) {
@@ -72,9 +72,9 @@ impl Picture {
 
     /// Change an attribute of this picture.
     #[inline]
-    pub fn change<Conn: Connection>(
+    pub fn change<Conn: Connection, Var: DisplayVariant>(
         self,
-        display: &mut Display<Conn>,
+        display: &Display<Conn, Var>,
         params: PictureParameters,
     ) -> crate::Result {
         sr_request!(display, self.change_request(params))
@@ -83,9 +83,9 @@ impl Picture {
     /// Change an attribute of this picture, async redox.
     #[cfg(feature = "async")]
     #[inline]
-    pub async fn change_async<Conn: AsyncConnection + Send>(
+    pub async fn change_async<Conn: AsyncConnection>(
         self,
-        display: &mut Display<Conn>,
+        display: &Display<Conn, SyncVariant>,
         params: PictureParameters,
     ) -> crate::Result {
         sr_request!(display, self.change_request(params), async).await
@@ -93,9 +93,9 @@ impl Picture {
 
     /// Composite this picture with another.
     #[inline]
-    pub fn composite<Conn: Connection>(
+    pub fn composite<Conn: Connection, Var: DisplayVariant>(
         self,
-        display: &mut Display<Conn>,
+        display: &Display<Conn, Var>,
         op: PictOp,
         mask: Picture,
         dst: Picture,
@@ -131,9 +131,9 @@ impl Picture {
     /// Composite this picture with another, async redox.
     #[cfg(feature = "async")]
     #[inline]
-    pub async fn composite_async<Conn: AsyncConnection + Send>(
+    pub async fn composite_async<Conn: AsyncConnection>(
         self,
-        display: &mut Display<Conn>,
+        display: &Display<Conn, SyncVariant>,
         op: PictOp,
         mask: Picture,
         dst: Picture,
@@ -170,9 +170,9 @@ impl Picture {
 
     /// Fill a series of solid color rectangles on this surface.
     #[inline]
-    pub fn fill_rectangles<Conn: Connection>(
+    pub fn fill_rectangles<Conn: Connection, Var: DisplayVariant>(
         self,
-        display: &mut Display<Conn>,
+        display: &Display<Conn, Var>,
         op: PictOp,
         color: Color,
         rects: &[Rectangle],
@@ -192,9 +192,9 @@ impl Picture {
     /// Fill a series of solid color rectangles on this surface, async redox.
     #[cfg(feature = "async")]
     #[inline]
-    pub async fn fill_rectangles_async<Conn: AsyncConnection + Send>(
+    pub async fn fill_rectangles_async<Conn: AsyncConnection>(
         self,
-        display: &mut Display<Conn>,
+        display: &Display<Conn, SyncVariant>,
         op: PictOp,
         color: Color,
         rects: &[Rectangle],
@@ -215,7 +215,7 @@ impl Picture {
 
     /// Free this picture.
     #[inline]
-    pub fn free<Conn: Connection>(self, display: &mut Display<Conn>) -> crate::Result {
+    pub fn free<Conn: Connection, Var: DisplayVariant>(self, display: &mut Display<Conn, Var>) -> crate::Result {
         sr_request!(
             display,
             FreePictureRequest {
@@ -228,9 +228,9 @@ impl Picture {
     /// Free this picture, async redox.
     #[cfg(feature = "async")]
     #[inline]
-    pub async fn free_async<Conn: AsyncConnection + Send>(
+    pub async fn free_async<Conn: AsyncConnection>(
         self,
-        display: &mut Display<Conn>,
+        display: &Display<Conn, SyncVariant>,
     ) -> crate::Result {
         sr_request!(
             display,
@@ -245,9 +245,9 @@ impl Picture {
 
     /// Draw a set of trapezoids.
     #[inline]
-    pub fn trapezoids<Conn: Connection>(
+    pub fn trapezoids<Conn: Connection, Var: DisplayVariant>(
         self,
-        display: &mut Display<Conn>,
+        display: &Display<Conn, Var>,
         op: PictOp,
         src: Picture,
         mask_format: Pictformat,
@@ -273,9 +273,9 @@ impl Picture {
     /// Draw a set of trapezoids, async redox.
     #[cfg(feature = "async")]
     #[inline]
-    pub async fn trapezoids_async<Conn: AsyncConnection + Send>(
+    pub async fn trapezoids_async<Conn: AsyncConnection>(
         self,
-        display: &mut Display<Conn>,
+        display: &Display<Conn, SyncVariant>,
         op: PictOp,
         src: Picture,
         mask_format: Pictformat,

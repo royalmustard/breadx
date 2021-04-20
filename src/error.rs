@@ -45,6 +45,8 @@ pub enum BreadError {
     LoadLibraryFailed(&'static str),
     /// Operation would block an async operation.
     WouldBlock,
+    /// Attempted to generate an XID and failed
+    NoXID,
 }
 
 impl BreadError {
@@ -106,6 +108,7 @@ impl fmt::Display for BreadError {
             Self::ClosedConnection => f.write_str("The X connection closed without our end of the connection closing. Did you forget to listen for WM_DELTE_WINDOW?"),
             Self::LoadLibraryFailed(l) => write!(f, "Failed to load library: {}", l),
             Self::WouldBlock => f.write_str("Operation would block an async function"),
+            Self::NoXID => f.write_str("Unable to generate an XID"),
             #[cfg(feature = "std")]
             Self::Io(i) => write!(f, "{}", i),
         }

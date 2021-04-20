@@ -12,14 +12,14 @@ use crate::{
         },
         xproto,
     },
-    display::{Connection, Display, RequestCookie},
+    display::{Connection, Display, DisplayVariant, RequestCookie},
     send_request, sr_request,
 };
 use alloc::vec::Vec;
 use core::convert::TryInto;
 
 #[cfg(feature = "async")]
-use crate::display::AsyncConnection;
+use crate::display::{AsyncConnection, SyncVariant};
 
 impl From<xproto::Drawable> for Drawable {
     #[inline]
@@ -57,7 +57,7 @@ impl From<GetFbConfigsReply> for Configs {
     }
 }
 
-impl<Conn> Display<Conn> {
+impl<Conn, Var> Display<Conn, Var> {
     #[inline]
     fn create_context_attribs_arb_request(
         context: Context,
@@ -81,11 +81,11 @@ impl<Conn> Display<Conn> {
     }
 }
 
-impl<Conn: Connection> Display<Conn> {
+impl<Conn: Connection, Var: DisplayVariant> Display<Conn, Var> {
     /// Query GLX version.
     #[inline]
     pub fn query_glx_version(
-        &mut self,
+        &self,
         required_major: u32,
         required_minor: u32,
     ) -> crate::Result<RequestCookie<QueryVersionRequest>> {
@@ -102,7 +102,7 @@ impl<Conn: Connection> Display<Conn> {
     /// Immediately query GLX version.
     #[inline]
     pub fn query_glx_version_immediate(
-        &mut self,
+        &self,
         required_major: u32,
         required_minor: u32,
     ) -> crate::Result<(u32, u32)> {
@@ -114,7 +114,7 @@ impl<Conn: Connection> Display<Conn> {
     /// Get the visual configurations associated with the given screen.
     #[inline]
     pub fn get_visual_configs(
-        &mut self,
+        &self,
         screen: usize,
     ) -> crate::Result<RequestCookie<GetVisualConfigsRequest>> {
         send_request!(
@@ -128,7 +128,7 @@ impl<Conn: Connection> Display<Conn> {
 
     /// Immediately get the visual configurations associated with the given screen.
     #[inline]
-    pub fn get_visual_configs_immediate(&mut self, screen: usize) -> crate::Result<Configs> {
+    pub fn get_visual_configs_immediate(&self, screen: usize) -> crate::Result<Configs> {
         let tok = self.get_visual_configs(screen)?;
         Ok(self.resolve_request(tok)?.into())
     }
@@ -136,7 +136,7 @@ impl<Conn: Connection> Display<Conn> {
     /// Get the framebuffer configurations associated with the given screen.
     #[inline]
     pub fn get_fb_configs(
-        &mut self,
+        &self,
         screen: usize,
     ) -> crate::Result<RequestCookie<GetFbConfigsRequest>> {
         send_request!(
@@ -150,7 +150,7 @@ impl<Conn: Connection> Display<Conn> {
 
     /// Immediately get the framebuffer configurations associated with the given screen.
     #[inline]
-    pub fn get_fb_configs_immediate(&mut self, screen: usize) -> crate::Result<Configs> {
+    pub fn get_fb_configs_immediate(&self, screen: usize) -> crate::Result<Configs> {
         let tok = self.get_fb_configs(screen)?;
         Ok(self.resolve_request(tok)?.into())
     }
@@ -158,7 +158,7 @@ impl<Conn: Connection> Display<Conn> {
     /// Get the properties of a GLX drawable.
     #[inline]
     pub fn get_drawable_properties(
-        &mut self,
+        &self,
         drawable: Drawable,
     ) -> crate::Result<RequestCookie<GetDrawableAttributesRequest>> {
         send_request!(
@@ -172,17 +172,14 @@ impl<Conn: Connection> Display<Conn> {
 
     /// Immediately get the properties of a GLX drawable.
     #[inline]
-    pub fn get_drawable_properties_immediate(
-        &mut self,
-        drawable: Drawable,
-    ) -> crate::Result<Vec<u32>> {
+    pub fn get_drawable_properties_immediate(&self, drawable: Drawable) -> crate::Result<Vec<u32>> {
         let tok = self.get_drawable_properties(drawable)?;
         Ok(self.resolve_request(tok)?.attribs)
     }
 
     #[inline]
     pub fn create_context_attribs_arb(
-        &mut self,
+        &self,
         fbconfig: Fbconfig,
         screen: usize,
         share_list: Context,
@@ -202,7 +199,7 @@ impl<Conn: Connection> Display<Conn> {
     /// Swap buffers.
     #[inline]
     pub fn swap_buffers<Target: Into<Drawable>>(
-        &mut self,
+        &self,
         context_tag: ContextTag,
         drawable: Target,
     ) -> crate::Result {
@@ -218,11 +215,11 @@ impl<Conn: Connection> Display<Conn> {
 }
 
 #[cfg(feature = "async")]
-impl<Conn: AsyncConnection + Send> Display<Conn> {
+impl<Conn: AsyncConnection> Display<Conn, SyncVariant> {
     /// Query GLX version, async redox.
     #[inline]
     pub async fn query_glx_version_async(
-        &mut self,
+        &self,
         required_major: u32,
         required_minor: u32,
     ) -> crate::Result<RequestCookie<QueryVersionRequest>> {
@@ -241,7 +238,7 @@ impl<Conn: AsyncConnection + Send> Display<Conn> {
     /// Get the visual configurations associated with the given screen, async redox.
     #[inline]
     pub async fn get_visual_configs_async(
-        &mut self,
+        &self,
         screen: usize,
     ) -> crate::Result<RequestCookie<GetVisualConfigsRequest>> {
         send_request!(
@@ -258,7 +255,7 @@ impl<Conn: AsyncConnection + Send> Display<Conn> {
     /// Immediately get the visual configurations associated with the given screen, async redox.
     #[inline]
     pub async fn get_visual_configs_immediate_async(
-        &mut self,
+        &self,
         screen: usize,
     ) -> crate::Result<Configs> {
         let tok = self.get_visual_configs_async(screen).await?;
@@ -268,7 +265,7 @@ impl<Conn: AsyncConnection + Send> Display<Conn> {
     /// Get the framebuffer configurations associated with the given screen, async redox.
     #[inline]
     pub async fn get_fb_configs_async(
-        &mut self,
+        &self,
         screen: usize,
     ) -> crate::Result<RequestCookie<GetFbConfigsRequest>> {
         send_request!(
@@ -284,10 +281,7 @@ impl<Conn: AsyncConnection + Send> Display<Conn> {
 
     /// Immediately get the framebuffer configurations associated with the given screen, async redox.
     #[inline]
-    pub async fn get_fb_configs_immediate_async(
-        &mut self,
-        screen: usize,
-    ) -> crate::Result<Configs> {
+    pub async fn get_fb_configs_immediate_async(&self, screen: usize) -> crate::Result<Configs> {
         let tok = self.get_fb_configs_async(screen).await?;
         Ok(self.resolve_request_async(tok).await?.into())
     }
@@ -295,7 +289,7 @@ impl<Conn: AsyncConnection + Send> Display<Conn> {
     /// Get the properties of a GLX drawable, async redox.
     #[inline]
     pub async fn get_drawable_properties_async(
-        &mut self,
+        &self,
         drawable: Drawable,
     ) -> crate::Result<RequestCookie<GetDrawableAttributesRequest>> {
         send_request!(
@@ -312,7 +306,7 @@ impl<Conn: AsyncConnection + Send> Display<Conn> {
     /// Immediately query GLX version, async redox.
     #[inline]
     pub async fn query_glx_version_immediate_async(
-        &mut self,
+        &self,
         required_major: u32,
         required_minor: u32,
     ) -> crate::Result<(u32, u32)> {
@@ -326,7 +320,7 @@ impl<Conn: AsyncConnection + Send> Display<Conn> {
     /// Immediately get the properties of a GLX drawable, async redox.
     #[inline]
     pub async fn get_drawable_properties_immediate_async(
-        &mut self,
+        &self,
         drawable: Drawable,
     ) -> crate::Result<Vec<u32>> {
         let tok = self.get_drawable_properties_async(drawable).await?;
@@ -335,7 +329,7 @@ impl<Conn: AsyncConnection + Send> Display<Conn> {
 
     #[inline]
     pub async fn create_context_attribs_arb_async(
-        &mut self,
+        &self,
         fbconfig: Fbconfig,
         screen: usize,
         share_list: Context,
@@ -357,7 +351,7 @@ impl<Conn: AsyncConnection + Send> Display<Conn> {
     /// Swap buffers, async redox.
     #[inline]
     pub async fn swap_buffers_async<Target: Into<Drawable>>(
-        &mut self,
+        &self,
         context_tag: ContextTag,
         drawable: Target,
     ) -> crate::Result {

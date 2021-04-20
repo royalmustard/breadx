@@ -13,19 +13,19 @@ use crate::{
         xfixes::Region,
         xproto::Pixmap,
     },
-    display::{Connection, Display, RequestCookie},
+    display::{Connection, Display, DisplayVariant, RequestCookie},
     extension::ExtensionVersion,
     send_request, sr_request, Drawable, Window, XID,
 };
 use alloc::vec::Vec;
 
 #[cfg(feature = "async")]
-use crate::display::AsyncConnection;
+use crate::display::{AsyncConnection, SyncVariant};
 
-impl<Conn: Connection> Display<Conn> {
+impl<Conn: Connection, Var: DisplayVariant> Display<Conn, Var> {
     #[inline]
     pub fn query_present_version(
-        &mut self,
+        &self,
         major: u32,
         minor: u32,
     ) -> crate::Result<RequestCookie<QueryVersionRequest>> {
@@ -41,7 +41,7 @@ impl<Conn: Connection> Display<Conn> {
 
     #[inline]
     pub fn query_present_version_immediate(
-        &mut self,
+        &self,
         major: u32,
         minor: u32,
     ) -> crate::Result<ExtensionVersion> {
@@ -55,7 +55,7 @@ impl<Conn: Connection> Display<Conn> {
 
     #[inline]
     pub fn present_capabilities<Target: Into<Drawable>>(
-        &mut self,
+        &self,
         drawable: Target,
     ) -> crate::Result<RequestCookie<QueryCapabilitiesRequest>> {
         send_request!(
@@ -69,7 +69,7 @@ impl<Conn: Connection> Display<Conn> {
 
     #[inline]
     pub fn present_capabilities_immediate<Target: Into<Drawable>>(
-        &mut self,
+        &self,
         drawable: Target,
     ) -> crate::Result<u32> {
         let tok = self.present_capabilities(drawable)?;
@@ -79,7 +79,7 @@ impl<Conn: Connection> Display<Conn> {
 
     #[inline]
     pub fn present_select_input(
-        &mut self,
+        &self,
         eid: XID,
         window: Window,
         em: EventMask,
@@ -97,7 +97,7 @@ impl<Conn: Connection> Display<Conn> {
 
     #[inline]
     pub fn present_pixmap(
-        &mut self,
+        &self,
         window: Window,
         pixmap: Pixmap,
         serial: u32,
@@ -139,10 +139,10 @@ impl<Conn: Connection> Display<Conn> {
 }
 
 #[cfg(feature = "async")]
-impl<Conn: AsyncConnection + Send> Display<Conn> {
+impl<Conn: AsyncConnection> Display<Conn, SyncVariant> {
     #[inline]
     pub async fn query_present_version_async(
-        &mut self,
+        &self,
         major: u32,
         minor: u32,
     ) -> crate::Result<RequestCookie<QueryVersionRequest>> {
@@ -160,7 +160,7 @@ impl<Conn: AsyncConnection + Send> Display<Conn> {
 
     #[inline]
     pub async fn query_present_version_immediate_async(
-        &mut self,
+        &self,
         major: u32,
         minor: u32,
     ) -> crate::Result<ExtensionVersion> {
@@ -174,7 +174,7 @@ impl<Conn: AsyncConnection + Send> Display<Conn> {
 
     #[inline]
     pub async fn present_capabilities_async<Target: Into<Drawable>>(
-        &mut self,
+        &self,
         drawable: Target,
     ) -> crate::Result<RequestCookie<QueryCapabilitiesRequest>> {
         send_request!(
@@ -190,7 +190,7 @@ impl<Conn: AsyncConnection + Send> Display<Conn> {
 
     #[inline]
     pub async fn present_capabilities_immediate_async<Target: Into<Drawable>>(
-        &mut self,
+        &self,
         drawable: Target,
     ) -> crate::Result<u32> {
         let tok = self.present_capabilities_async(drawable).await?;
@@ -200,7 +200,7 @@ impl<Conn: AsyncConnection + Send> Display<Conn> {
 
     #[inline]
     pub async fn present_select_input_async(
-        &mut self,
+        &self,
         eid: XID,
         window: Window,
         em: EventMask,
@@ -220,7 +220,7 @@ impl<Conn: AsyncConnection + Send> Display<Conn> {
 
     #[inline]
     pub async fn present_pixmap_async(
-        &mut self,
+        &self,
         window: Window,
         pixmap: Pixmap,
         serial: u32,

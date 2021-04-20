@@ -2,16 +2,19 @@
 
 use crate::{
     auto::xproto::{Cursor, FreeCursorRequest},
-    display::{Connection, Display},
+    display::{Connection, Display, DisplayVariant},
     sr_request,
 };
 
 #[cfg(feature = "async")]
-use crate::display::AsyncConnection;
+use crate::display::{AsyncConnection, SyncVariant};
 
 impl Cursor {
     #[inline]
-    pub fn free<Conn: Connection>(self, dpy: &mut Display<Conn>) -> crate::Result {
+    pub fn free<Conn: Connection, Var: DisplayVariant>(
+        self,
+        dpy: &mut Display<Conn, Var>,
+    ) -> crate::Result {
         sr_request!(
             dpy,
             FreeCursorRequest {
@@ -23,9 +26,9 @@ impl Cursor {
 
     #[cfg(feature = "async")]
     #[inline]
-    pub async fn free_async<Conn: AsyncConnection + Send>(
+    pub async fn free_async<Conn: AsyncConnection>(
         self,
-        dpy: &mut Display<Conn>,
+        dpy: &mut Display<Conn, SyncVariant>,
     ) -> crate::Result {
         sr_request!(
             dpy,
