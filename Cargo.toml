@@ -15,6 +15,7 @@ bytemuck = "1.4.1"
 cfg-if = "1"
 concurrent-queue = { version = "1.2", optional = true }
 dashmap = { version = "4", optional = true }
+delaunator = { version = "0.2", optional = true }
 cty = "0.2.1"
 futures-lite = { version = "1.11.2", optional = true }
 gluten-keyboard = "0.1.2"
@@ -61,7 +62,7 @@ present = ["randr", "fixes", "sync"]
 print = []
 randr = ["render"]
 record = []
-render = []
+render = ["delaunator", "std"]
 res = []
 screensaver = []
 selinux = []
